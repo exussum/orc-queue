@@ -1,6 +1,6 @@
 [project]
 name = "orc-queue"
-version = "0.0.1"
+version = "0.0.2"
 description = "Timezone-aware job queues with memory or sqlite stores, cron jobs, and a coordinator that runs them on threads or asyncio"
 requires-python = ">=3.14,<3.15"
 dependencies = ["cronsim==2.7"]
