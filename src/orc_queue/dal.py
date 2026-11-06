@@ -30,7 +30,6 @@ class Store(Protocol[T]):
     def first(self) -> Optional[m.Job[T]]: ...
     def skipped(self, now: m.AwareDatetime) -> list[m.Job[T]]: ...
     def all(self) -> list[m.Job[T]]: ...
-    def clear(self) -> None: ...
     def count(self) -> int: ...
 
 
@@ -71,11 +70,6 @@ class MemoryStore(Generic[T]):
 
     def all(self) -> list[m.Job[T]]:
         return [self._jobs[key.id] for key in self._order]
-
-    def clear(self) -> None:
-        self._jobs.clear()
-        self._keys.clear()
-        self._order.clear()
 
     def count(self) -> int:
         return len(self._jobs)
@@ -139,10 +133,6 @@ class SqliteStore(Generic[T]):
     def all(self) -> list[m.Job[T]]:
         rows = self._db.execute("SELECT id, job FROM jobs WHERE queue = ? ORDER BY disable, run_at, id", (self._name,)).fetchall()
         return [self._load(row) for row in rows]
-
-    def clear(self) -> None:
-        self._db.execute("DELETE FROM jobs WHERE queue = ?", (self._name,))
-        self._db.commit()
 
     def count(self) -> int:
         return int(self._db.execute("SELECT COUNT(*) FROM jobs WHERE queue = ?", (self._name,)).fetchone()[0])

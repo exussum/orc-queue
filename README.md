@@ -98,7 +98,7 @@ Methods, all called with the lock held:
 | `next_job() -> Job \| None`     | The next job that will run, without taking it.                                                                     |
 | `jobs() -> list[Job]`           | Every job, soonest first, disabled ones last.                                                                      |
 | `count() -> int`                | How many jobs the queue holds.                                                                                     |
-| `reset() -> None`               | Deletes every job. A paused queue stays paused.                                                                    |
+| `reset() -> None`               | Deletes every one-off job; repeating jobs stay. A paused queue stays paused.                                       |
 | `pause() -> None`               | Holds the queue: none of its jobs run until `resume()`.                                                            |
 | `resume() -> None`              | Releases the queue.                                                                                                |
 | `paused -> bool`                | Whether the queue is paused.                                                                                       |

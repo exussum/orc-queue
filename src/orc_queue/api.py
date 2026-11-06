@@ -139,7 +139,9 @@ class JobQueue(Generic[T]):
         return self._store.all()
 
     def reset(self) -> None:
-        self._store.clear()
+        for job in self._store.all():
+            if not isinstance(job, m.CronJob):
+                self._store.delete(job.id)
         self.changed.set()
         emit(self.events, m.Event.RESET, queue=self)
 

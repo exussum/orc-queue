@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 from datetime import timedelta, timezone
+from pathlib import Path
 from typing import cast
 
 from orc_queue import (
@@ -240,6 +241,7 @@ async def main(duration: float, db: str, seed: int, producers: int, horizon: flo
     logging.getLogger("orc_queue").addHandler(CountingHandler())
     logging.getLogger("orc_queue").setLevel(logging.INFO)
     rng = random.Random(seed)
+    Path(db).unlink(missing_ok=True)
     counting = CountingLock()
     lock = cast(threading.RLock, counting)
     wake = threading.Event()
@@ -249,9 +251,6 @@ async def main(duration: float, db: str, seed: int, producers: int, horizon: flo
         store = MemoryStore() if i % 2 == 0 else SqliteStore(db, f"q{i}")
         policy = OnFull.EVICT if i % 3 == 0 else OnFull.REJECT
         queues.append(JobQueue(lock, wake, store, rng.choice([10, 15, 20, 40]), events, name=f"q{i}", on_full=policy))
-    for q in queues:
-        with q.coordinator_lock:
-            q.reset()
     lanes = [
         ThreadLane(queues[0]),
         ThreadLane(queues[1], queues[2]),

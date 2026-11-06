@@ -1,13 +1,13 @@
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import at, noop, now
 
-from orc_queue import Event, Job, JobQueue, MemoryStore, on
+from orc_queue import Event, Job, JobQueue, MemoryStore, on, schedule
 
 
 def drain(queue):
@@ -109,6 +109,16 @@ def test_pause_blocks_pop_but_reports_next(queue):
         queue.reset()
     with queue.coordinator_lock:
         assert queue.paused and queue.count() == 0
+
+
+def test_reset_keeps_cron_jobs(queue):
+    with queue.coordinator_lock:
+        queue.add(Job(at(13), noop, id="once"))
+        queue.add(schedule("0 * * * *", timezone.utc, noop, id_template="hourly"))
+    with queue.coordinator_lock:
+        queue.reset()
+    with queue.coordinator_lock:
+        assert [job.id for job in queue.jobs()] == ["hourly"]
 
 
 def test_pop_declines_a_job_not_yet_due(queue, freezegun_clock):
