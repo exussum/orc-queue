@@ -154,7 +154,7 @@ async def test_an_unloadable_row_does_not_stop_the_scan(open_queue, db):
     with q.coordinator_lock:
         q.add(Job(at(2), noop, id="good"))
     plant(db, "bad", b"garbage")
-    coordinator = Coordinator([ThreadLane([q])])
+    coordinator = Coordinator(ThreadLane(q))
     coordinator.start()
     queue, job = await coordinator.next()
     assert queue is q and job.id == "good"

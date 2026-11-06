@@ -12,7 +12,7 @@ from orc_queue import AsyncLane, AsyncService, Coordinator, Job, JobQueue, Memor
 @pytest.fixture
 def coordinator_for(lock, wake, events):
     q = JobQueue(lock, wake, MemoryStore(), 100, events)
-    return lambda *services: Coordinator([AsyncLane([q])], services=services)
+    return lambda *services: Coordinator(AsyncLane(q), services=services)
 
 
 async def test_runs_until_stopped_and_restarts_after_crashes(coordinator_for, make_service, drive, caplog):
@@ -94,7 +94,7 @@ async def test_services_start_before_the_scan_and_stop_after_lanes(lock, wake, d
 
     with q.coordinator_lock:
         q.add(Job(at(0), job, payload="job", id="j"))
-    coordinator = Coordinator([AsyncLane([q])], services=[AsyncService(svc)])
+    coordinator = Coordinator(AsyncLane(q), services=[AsyncService(svc)])
     await drive(coordinator, seconds=0.02)
     assert order == ["service-start", "job", "service-stop"]
 

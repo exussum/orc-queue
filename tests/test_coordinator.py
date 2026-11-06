@@ -38,8 +38,8 @@ async def test_lanes_run_in_parallel_and_serial_within(two_queues, kind):
         a.add(Job(base, recorder(seen, "a2-next"), id="a2-next"))
     with b.coordinator_lock:
         b.add(Job(base, recorder(seen, "fast"), id="fast"))
-    lane_a = ThreadLane([a]) if kind == "thread" else AsyncLane([a])
-    coordinator = Coordinator([lane_a, ThreadLane([b])])
+    lane_a = ThreadLane(a) if kind == "thread" else AsyncLane(a)
+    coordinator = Coordinator(lane_a, ThreadLane(b))
     coordinator.resume()
     coordinator.start()
     task = asyncio.create_task(coordinator.run())
@@ -66,7 +66,7 @@ async def test_lane_keeps_slot_order_across_its_queues(two_queues, make_lane, dr
     for i, q in enumerate([a, b, a, b]):
         with q.coordinator_lock:
             q.add(Job(base, lambda payload: seen.append(payload), payload=f"j{i}", id=f"j{i}"))
-    await drive(Coordinator([make_lane(a, b)]), until=lambda: len(seen) == 4)
+    await drive(Coordinator(make_lane(a, b)), until=lambda: len(seen) == 4)
     assert seen == ["j0", "j2", "j1", "j3"]
 
 
@@ -85,7 +85,7 @@ async def test_job_exception_is_isolated(two_queues, make_lane, drive, caplog, e
     on(events, Event.ERROR, lambda queue, job, error: errors.append((job.id, str(error))))
     lane = make_lane(a, b)
     with caplog.at_level("ERROR", logger="orc_queue"):
-        await drive(Coordinator([lane]), until=lambda: done == ["good"])
+        await drive(Coordinator(lane), until=lambda: done == ["good"])
     assert errors == [("bad", "boom")]
     assert any("job bad on queue 'a' failed" in r.message for r in caplog.records)
 
@@ -97,7 +97,7 @@ async def test_stop_finishes_what_was_already_submitted(two_queues, make_lane):
     for i in range(3):
         with a.coordinator_lock:
             a.add(Job(base, recorder(finished, f"j{i}", sleep=0.05), id=f"j{i}"))
-    coordinator = Coordinator([make_lane(a, b)])
+    coordinator = Coordinator(make_lane(a, b))
     coordinator.resume()
     coordinator.start()
     task = asyncio.create_task(coordinator.run())
@@ -122,7 +122,7 @@ async def test_thread_lane_keeps_the_loop_responsive(two_queues):
 
     with a.coordinator_lock:
         a.add(Job(now(), fn, id="x"))
-    coordinator = Coordinator([ThreadLane([a, b])])
+    coordinator = Coordinator(ThreadLane(a, b))
     coordinator.resume()
     coordinator.start()
     task = asyncio.create_task(coordinator.run())
@@ -150,20 +150,20 @@ async def test_async_lane_timeout_fails_the_job_and_continues(two_queues, drive,
     with a.coordinator_lock:
         a.add(Job(base, lambda payload: done.append(payload), payload="next", id="next"))
     on(events, Event.ERROR, lambda queue, job, error: errors.append((job.id, type(error).__name__)))
-    lane = AsyncLane([a, b], timeout=0.05)
-    await drive(Coordinator([lane]), until=lambda: done == ["next"])
+    lane = AsyncLane(a, b, timeout=0.05)
+    await drive(Coordinator(lane), until=lambda: done == ["next"])
     assert errors == [("hang", "TimeoutError")]
 
 
 async def test_lane_assignment_is_validated_and_stop_is_safe_before_run(two_queues):
     a, b = two_queues
     with pytest.raises(ValueError, match="two lanes"):
-        Coordinator([ThreadLane([a, b]), AsyncLane([b])])
+        Coordinator(ThreadLane(a, b), AsyncLane(b))
     with pytest.raises(ValueError, match="at least one"):
-        AsyncLane([])
+        AsyncLane()
     with pytest.raises(ValueError, match="at least one"):
-        Coordinator([])
-    await Coordinator([ThreadLane([a]), AsyncLane([b])]).stop()
+        Coordinator()
+    await Coordinator(ThreadLane(a), AsyncLane(b)).stop()
     assert noop() is None
 
 
@@ -193,7 +193,7 @@ async def test_fn_arguments_follow_its_signature(two_queues, make_lane, drive):
         a.add(Job(base, with_ctx, id="3"))
     with a.coordinator_lock:
         a.add(Job(base, with_both, "d", id="4"))
-    await drive(Coordinator([make_lane(a, b)], context=context), until=lambda: len(calls) == 4)
+    await drive(Coordinator(make_lane(a, b), context=context), until=lambda: len(calls) == 4)
     assert calls == [("bare",), ("payload", "p"), ("ctx", context), ("both", "d", context)]
 
 
@@ -202,7 +202,7 @@ async def test_coordinator_starts_paused_until_resumed(two_queues, drive):
     ran = []
     with a.coordinator_lock:
         a.add(Job(now(), lambda: ran.append(1), id="x"))
-    coordinator = Coordinator([AsyncLane([a, b])])
+    coordinator = Coordinator(AsyncLane(a, b))
     assert not a.paused and not b.paused
     coordinator.start()
     task = asyncio.create_task(coordinator.run())
@@ -223,7 +223,7 @@ async def test_a_store_error_during_a_pop_ends_run(lock, wake, events):
     q = JobQueue(lock, wake, FlakyStore(MemoryStore(), {"delete"}), 100, events, name="q")
     with q.coordinator_lock:
         q.add(Job(now(), noop, id="x"))
-    coordinator = Coordinator([ThreadLane([q])])
+    coordinator = Coordinator(ThreadLane(q))
     coordinator.resume()
     with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
         coordinator.start()
@@ -234,7 +234,7 @@ async def test_a_store_error_during_a_pop_ends_run(lock, wake, events):
 async def test_no_thread_runs_before_start_and_all_do_after(two_queues):
     a, b = two_queues
     service = ThreadService(lambda stop: stop.wait(), name="svc")
-    coordinator = Coordinator([ThreadLane([a]), ThreadLane([b])], services=[service])
+    coordinator = Coordinator(ThreadLane(a), ThreadLane(b), services=[service])
     before = set(threading.enumerate())
     assert not any(t.name in ("coordinator", "lane", "service-svc") for t in before)
     coordinator.start()

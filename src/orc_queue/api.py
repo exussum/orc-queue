@@ -167,12 +167,12 @@ class JobQueue(Generic[T]):
 
 
 class Coordinator(Generic[T]):
-    def __init__(self, lanes: Sequence[Lane[T]], services: Sequence[Service] = (), context: Any = None) -> None:
+    def __init__(self, *lanes: Lane[T], services: Sequence[Service] = (), context: Any = None) -> None:
         if not lanes:
             raise ValueError("a coordinator needs at least one lane")
-        self.lanes = list(lanes)
-        self.services = list(services)
-        self.queues: list[JobQueue[T]] = []
+        self.lanes = lanes
+        self.services = tuple(services)
+        self.queues = tuple(queue for lane in lanes for queue in lane.queues)
         self._lane_of: dict[int, Lane[T]] = {}
         for lane in lanes:
             lane.context = context
@@ -180,7 +180,6 @@ class Coordinator(Generic[T]):
                 if id(queue) in self._lane_of:
                     raise ValueError(f"queue {queue.name!r} is in two lanes")
                 self._lane_of[id(queue)] = lane
-                self.queues.append(queue)
         first = self.queues[0]
         if any(q.coordinator_lock is not first.coordinator_lock or q.changed is not first.changed for q in self.queues):
             raise ValueError("every queue must share one lock and one changed event")
@@ -369,10 +368,10 @@ class Coordinator(Generic[T]):
 
 
 class ThreadLane(Generic[T]):
-    def __init__(self, queues: Sequence[JobQueue[T]]) -> None:
+    def __init__(self, *queues: JobQueue[T]) -> None:
         if not queues:
             raise ValueError("a lane needs at least one queue")
-        self.queues = list(queues)
+        self.queues = queues
         self.busy = False
         self.context: Any = None
         self._lock = queues[0].coordinator_lock
@@ -429,10 +428,10 @@ class ThreadLane(Generic[T]):
 
 
 class AsyncLane(Generic[T]):
-    def __init__(self, queues: Sequence[JobQueue[T]], timeout: Optional[float] = None) -> None:
+    def __init__(self, *queues: JobQueue[T], timeout: Optional[float] = None) -> None:
         if not queues:
             raise ValueError("a lane needs at least one queue")
-        self.queues = list(queues)
+        self.queues = queues
         self.busy = False
         self.context: Any = None
         self._lock = queues[0].coordinator_lock

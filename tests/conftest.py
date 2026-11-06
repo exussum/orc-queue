@@ -91,7 +91,7 @@ def drive():
 @pytest.fixture(params=["thread", "async"])
 def make_lane(request):
     def make(*queues, **kw):
-        return ThreadLane(list(queues), **kw) if request.param == "thread" else AsyncLane(list(queues), **kw)
+        return ThreadLane(*queues, **kw) if request.param == "thread" else AsyncLane(*queues, **kw)
 
     make.kind = request.param
     return make

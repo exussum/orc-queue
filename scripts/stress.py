@@ -253,12 +253,12 @@ async def main(duration: float, db: str, seed: int, producers: int, horizon: flo
         with q.coordinator_lock:
             q.reset()
     lanes = [
-        ThreadLane([queues[0]]),
-        ThreadLane([queues[1], queues[2]]),
-        ThreadLane([queues[3]]),
-        AsyncLane([queues[4]]),
-        AsyncLane([queues[5], queues[6]], timeout=30),
-        AsyncLane([queues[7], queues[8], queues[9]]),
+        ThreadLane(queues[0]),
+        ThreadLane(queues[1], queues[2]),
+        ThreadLane(queues[3]),
+        AsyncLane(queues[4]),
+        AsyncLane(queues[5], queues[6], timeout=30),
+        AsyncLane(queues[7], queues[8], queues[9]),
     ]
     kind_of = {}
     for lane in lanes:
@@ -274,7 +274,7 @@ async def main(duration: float, db: str, seed: int, producers: int, horizon: flo
         payload = {"id": f"cron{n}", "queue": q.name, "run_at": utcnow(), "sleep": 0, "cron": True}
         with q.coordinator_lock:
             q.add(schedule("* * * * *", timezone.utc, tick, id_template=f"cron{n}-{{uuid}}", payload=payload))
-    coordinator = Coordinator(lanes, services)
+    coordinator = Coordinator(*lanes, services=services)
     stats: collections.Counter = collections.Counter()
     lag = [0.0]
     stop = asyncio.Event()

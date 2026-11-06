@@ -19,7 +19,7 @@ greetings = JobQueue(coordinator_lock=shared_lock, changed=changed, store=Memory
 with greetings.coordinator_lock:
     greetings.add(Job(run_at=utcnow() + timedelta(seconds=2), fn=lambda payload: print("ran", payload), payload="hello", id="greet"))
 
-coordinator = Coordinator([ThreadLane([greetings])])
+coordinator = Coordinator(ThreadLane(greetings))
 
 
 async def main() -> None:
@@ -125,7 +125,7 @@ Methods, all called with the lock held:
 
 ## Coordinator
 
-### `Coordinator(lanes, services=(), context=None)`
+### `Coordinator(*lanes, services=(), context=None)`
 
 Runs jobs from every queue in `lanes` as they come due, and supervises
 `services`. `context` is passed to every job's `fn` as `ctx`. A queue may
@@ -150,8 +150,8 @@ The coordinator's methods take the lock themselves; don't hold it around them.
 A lane runs the jobs of its queues one at a time, soonest first. Separate lanes
 run in parallel, so put jobs that must not overlap in the same lane.
 
-- `ThreadLane(queues)`: runs jobs on a thread of its own.
-- `AsyncLane(queues, timeout=None)`: runs jobs on the event loop, awaiting
+- `ThreadLane(*queues)`: runs jobs on a thread of its own.
+- `AsyncLane(*queues, timeout=None)`: runs jobs on the event loop, awaiting
   coroutine functions. A job running longer than `timeout` seconds is
   cancelled.
 
