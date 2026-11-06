@@ -412,15 +412,20 @@ class ThreadLane(Generic[T]):
             run(job)
         except Exception as exc:
             _log.exception("job %s on queue %r failed", job.id, queue.name)
-            with self._lock:
-                emit(queue.events, m.Event.ERROR, queue=queue, job=job, error=exc)
+            self._report(queue, m.Event.ERROR, job=job, error=exc)
         else:
-            with self._lock:
-                emit(queue.events, m.Event.EXECUTED, queue=queue, job=job)
+            self._report(queue, m.Event.EXECUTED, job=job)
         finally:
             with self._lock:
                 self.busy = False
             self._wake.set()
+
+    def _report(self, queue: JobQueue[T], event: m.Event, **info: Any) -> None:
+        try:
+            with self._lock:
+                emit(queue.events, event, queue=queue, **info)
+        except Exception:
+            _log.exception("%s listener raised for job %s on queue %r", event, info["job"].id, queue.name)
 
 
 class AsyncLane(Generic[T]):
