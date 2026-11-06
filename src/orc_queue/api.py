@@ -127,12 +127,18 @@ class JobQueue(Generic[T]):
         return job
 
     def next_job(self) -> Optional[m.Job[T]]:
-        skipped = self._store.skipped(m.utcnow())
-        for job in skipped:
+        now = m.utcnow()
+        dropped = []
+        for job in self._store.skipped(now):
             self._store.delete(job.id)
-            emit(self.events, m.Event.REMOVED, queue=self, job=job)
-        if skipped:
-            _log.info("queue %r: deleted skipped disabled jobs %s", self.name, [job.id for job in skipped])
+            successor = next_instance(job, after=now)
+            if successor:
+                self._store.put(successor)
+            else:
+                dropped.append(job.id)
+                emit(self.events, m.Event.REMOVED, queue=self, job=job)
+        if dropped:
+            _log.info("queue %r: deleted skipped disabled jobs: %s", self.name, ", ".join(dropped))
         return self._store.first()
 
     def jobs(self) -> list[m.Job[T]]:

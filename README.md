@@ -117,9 +117,11 @@ Methods, all called with the lock held:
 
 ### Pausing
 
-- Skip one job: set `job.disable = True` and call `queue.update(job)`. It stays
-  in the queue, and can be re-enabled, until its time passes; then it is
-  deleted without running.
+- Disable a job: set `job.disable = True` and call `queue.update(job)`. A
+  one-off job stays in the queue, and can be re-enabled, until its time
+  passes; then it is deleted without running. A repeating job is never
+  deleted: each time it comes due it moves to its next slot without running,
+  still disabled, until it is re-enabled.
 - Hold a whole queue: `queue.pause()`. Nothing in it runs until `resume()`;
   then overdue jobs run in order, and a repeating job runs once to catch up.
 

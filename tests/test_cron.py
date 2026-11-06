@@ -77,8 +77,8 @@ def test_remove_and_add_do_not_respawn(queue, freezegun_clock):
         assert queue.count() == 1
 
 
-def test_disabled_cron_is_deleted_when_skipped(queue):
-    job = CronJob(at(1), noop, cron="0 * * * *", id="h")
+def test_disabled_cron_moves_to_its_next_slot_still_disabled(queue):
+    job = CronJob(at(1), noop, cron="0 * * * *", id="h", id_template="h")
     with queue.coordinator_lock:
         queue.add(job)
     job.disable = True
@@ -87,7 +87,8 @@ def test_disabled_cron_is_deleted_when_skipped(queue):
     with queue.coordinator_lock:
         assert queue.next_job() is None
     with queue.coordinator_lock:
-        assert queue.count() == 0
+        [kept] = queue.jobs()
+    assert kept.id == "h" and kept.disable and kept.run_at > now()
 
 
 def test_queue_pause_catches_up_once_on_resume(queue, freezegun_clock):
