@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import replace
 from datetime import tzinfo
-from typing import Any, Awaitable, Callable, Generic, Optional, ParamSpec, Sequence, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Iterable, Optional, ParamSpec, Sequence, TypeVar
 
 from cronsim import CronSim
 
@@ -174,33 +174,16 @@ class JobQueue(Generic[T]):
         return self._store.count()
 
 
-class Coordinator(Generic[T]):
-    def __init__(self, *lanes: Lane[T], services: Sequence[Service] = (), context: Any = None) -> None:
-        if not lanes:
-            raise ValueError("a coordinator needs at least one lane")
-        self.lanes = lanes
-        self.services = tuple(services)
-        self.queues = tuple(queue for lane in lanes for queue in lane.queues)
-        self._lane_of: dict[int, Lane[T]] = {}
-        for lane in lanes:
-            lane.context = context
-            for queue in lane.queues:
-                if id(queue) in self._lane_of:
-                    raise ValueError(f"queue {queue.name!r} is in two lanes")
-                self._lane_of[id(queue)] = lane
-        first = self.queues[0]
-        if any(q.coordinator_lock is not first.coordinator_lock or q.changed is not first.changed for q in self.queues):
+class _Queues(Generic[T]):
+    def __init__(self, queues: tuple[JobQueue[T], ...]) -> None:
+        if not queues:
+            raise ValueError("a coordinator needs at least one queue")
+        first = queues[0]
+        if len({(q.coordinator_lock, q.changed) for q in queues}) > 1:
             raise ValueError("every queue must share one lock and one changed event")
+        self.queues = queues
         self.lock = first.coordinator_lock
-        self._wake = first.changed
         self._events = first.events
-        self._stopped = False
-        self._thread = threading.Thread(target=self._watch, name="coordinator", daemon=True)
-        self._ask = threading.Event()
-        self._found: Optional[asyncio.Future[Optional[JobQueue[T]]]] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._failed: Optional[asyncio.Future[ServiceFailed]] = None
-        self._resumed = asyncio.Event()
 
     def lookup(self, name: str) -> Optional[JobQueue[T]]:
         return next((queue for queue in self.queues if queue.name == name), None)
@@ -236,6 +219,30 @@ class Coordinator(Generic[T]):
         if queue:
             with self.lock:
                 queue.pause()
+
+
+class Coordinator(_Queues[T]):
+    def __init__(self, *lanes: Lane[T], services: Sequence[Service] = (), context: Any = None) -> None:
+        if not lanes:
+            raise ValueError("a coordinator needs at least one lane")
+        self.lanes = lanes
+        self.services = tuple(services)
+        self._lane_of: dict[int, Lane[T]] = {}
+        for lane in lanes:
+            lane.context = context
+            for queue in lane.queues:
+                if id(queue) in self._lane_of:
+                    raise ValueError(f"queue {queue.name!r} is in two lanes")
+                self._lane_of[id(queue)] = lane
+        super().__init__(tuple(queue for lane in lanes for queue in lane.queues))
+        self._wake = self.queues[0].changed
+        self._stopped = False
+        self._thread = threading.Thread(target=self._watch, name="coordinator", daemon=True)
+        self._ask = threading.Event()
+        self._found: Optional[asyncio.Future[Optional[JobQueue[T]]]] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._failed: Optional[asyncio.Future[ServiceFailed]] = None
+        self._resumed = asyncio.Event()
 
     def start(self) -> None:
         loop = asyncio.get_running_loop()
@@ -320,15 +327,9 @@ class Coordinator(Generic[T]):
         with self.lock:
             if self._stopped:
                 return None
-            heads = []
-            for queue in self.queues:
-                if queue.paused or self._lane_of[id(queue)].busy:
-                    continue
-                job = queue.next_job()
-                if job:
-                    heads.append((job.run_at, queue))
-            if heads:
-                run_at, queue = min(heads, key=lambda h: h[0])
+            head = _earliest(q for q in self.queues if not self._lane_of[id(q)].busy)
+            if head:
+                run_at, queue = head
                 wait = (run_at - m.utcnow()).total_seconds()
                 if wait <= 0:
                     return queue
@@ -373,6 +374,37 @@ class Coordinator(Generic[T]):
         for service in reversed(self.services):
             await service.stop()
         emit(self._events, m.Event.SHUTDOWN)
+
+
+class ManualCoordinator(_Queues[T]):
+    def __init__(self, *queues: JobQueue[T], context: Any = None) -> None:
+        super().__init__(queues)
+        self.context = context
+
+    def run_until(self, until: m.AwareDatetime, *, tick: Callable[[m.AwareDatetime], None]) -> None:
+        while True:
+            with self.lock:
+                head = _earliest(self.queues)
+            if not head or head[0] > until:
+                break
+            run_at, queue = head
+            tick(max(run_at, m.utcnow()))
+            with self.lock:
+                job = queue.pop()
+                if not job:
+                    raise RuntimeError(f"tick did not move the clock to {run_at.isoformat()}")
+                emit(queue.events, m.Event.SUBMITTED, queue=queue, job=job)
+            job.context = self.context
+            try:
+                run(job)
+            except Exception as exc:
+                _log.exception("job %s on queue %r failed", job.id, queue.name)
+                with self.lock:
+                    emit(queue.events, m.Event.ERROR, queue=queue, job=job, error=exc)
+            else:
+                with self.lock:
+                    emit(queue.events, m.Event.EXECUTED, queue=queue, job=job)
+        tick(until)
 
 
 class ThreadLane(Generic[T]):
@@ -628,6 +660,11 @@ def next_instance(job: m.Job[T], after: Optional[m.AwareDatetime] = None) -> Opt
     start = max(job.run_at, after or m.utcnow()).astimezone(job.run_at.tzinfo)
     run_at = m.aware(next(CronSim(job.cron, start)), "run_at")
     return replace(job, run_at=run_at, id=job.id_template.format(uuid=uuid.uuid4()))
+
+
+def _earliest(queues: Iterable[JobQueue[T]]) -> Optional[tuple[m.AwareDatetime, JobQueue[T]]]:
+    heads = [(job.run_at, queue) for queue in queues if not queue.paused and (job := queue.next_job())]
+    return min(heads, key=lambda head: head[0]) if heads else None
 
 
 async def _join(thread: threading.Thread, timeout: Optional[float] = None) -> None:

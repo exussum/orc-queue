@@ -157,6 +157,20 @@ run in parallel, so put jobs that must not overlap in the same lane.
   coroutine functions. A job running longer than `timeout` seconds is
   cancelled.
 
+### Manual coordinator
+
+`ManualCoordinator(*queues, context=None)` runs the same queues without
+threads, lanes or an event loop, for tests that need to step through time. It
+has the coordinator's `lookup`, `find`, `cancel_job`, `pause_job` and
+`pause_queue`, plus:
+
+- `run_until(until, *, tick)`: runs every job due by `until`, one at a time on
+  the calling thread, earliest first across all its queues. Before each job it
+  calls `tick` with the job's time, and at the end with `until`; pass a frozen
+  clock's `move_to` (freezegun) so each job runs at its own time. Paused queues
+  are skipped, repeating jobs come back at their next time, and the same
+  `SUBMITTED`, `EXECUTED` and `ERROR` events fire.
+
 ### Services
 
 `ThreadService(fn, *, name=None, restart_after=1.0, stop_timeout=10.0)` and
