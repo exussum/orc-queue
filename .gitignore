@@ -1,0 +1,14 @@
+*.pyc
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+*.sw[mnop]
+.coverage
+dist/
+*.prof
+*.db
+.venv/
+pylock.toml
+scripts/deploy.env

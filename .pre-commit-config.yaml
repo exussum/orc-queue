@@ -1,0 +1,61 @@
+default_language_version:
+  python: python3.14
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: opengrep
+        name: opengrep
+        entry: opengrep scan
+        language: system
+        args: ["--config", "auto", "--error", "--skip-unknown-extensions"]
+        require_serial: true
+        exclude: '^tests/'
+
+  - repo: https://github.com/betterleaks/betterleaks
+    rev: v1.6.1
+    hooks:
+      - id: betterleaks
+
+  - repo: local
+    hooks:
+      - id: uv-lock
+        name: uv-lock
+        entry: uv lock
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
+
+      - id: pylock
+        name: pylock
+        entry: uv export --frozen --format pylock.toml -o pylock.toml
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock|pylock\.toml)$
+
+      - id: pip-audit
+        name: pip-audit
+        entry: pip-audit --locked .
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
+
+      - id: mypy
+        name: mypy
+        entry: uv run --extra lint mypy
+        language: system
+        pass_filenames: false
+        files: \.py$
+
+      - id: pytest
+        name: pytest
+        entry: uv run --extra test pytest
+        language: system
+        pass_filenames: false
+        files: \.py$
