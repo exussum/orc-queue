@@ -188,28 +188,25 @@ class _Queues(Generic[T]):
     def lookup(self, name: str) -> Optional[JobQueue[T]]:
         return next((queue for queue in self.queues if queue.name == name), None)
 
-    def find(self, job_id: str) -> Optional[tuple[JobQueue[T], m.Job[T]]]:
+    def find(self, job_id: str, name: str) -> Optional[m.Job[T]]:
         with self.lock:
-            for queue in self.queues:
-                job = queue.get(job_id)
-                if job:
-                    return queue, job
-        return None
+            queue = self.lookup(name)
+            return queue.get(job_id) if queue else None
 
-    def cancel_job(self, job_id: str) -> bool:
+    def cancel_job(self, job_id: str, name: str) -> bool:
         with self.lock:
-            found = self.find(job_id)
-            if not found:
+            queue = self.lookup(name)
+            if not queue or not queue.get(job_id):
                 return False
-            found[0].remove(job_id)
+            queue.remove(job_id)
             return True
 
-    def pause_job(self, job_id: str, disable: bool) -> bool:
+    def pause_job(self, job_id: str, disable: bool, name: str) -> bool:
         with self.lock:
-            found = self.find(job_id)
-            if not found:
+            queue = self.lookup(name)
+            job = queue.get(job_id) if queue else None
+            if not queue or not job:
                 return False
-            queue, job = found
             job.disable = disable
             queue.update(job)
             return True

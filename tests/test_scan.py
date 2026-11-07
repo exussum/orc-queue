@@ -81,28 +81,30 @@ async def test_coordinator_finds_queues_by_name(two_queues):
     assert ctl.lookup("c") is None
 
 
-async def test_coordinator_finds_a_job_across_queues(two_queues):
+async def test_coordinator_finds_a_job_in_the_named_queue(two_queues):
     a, b = two_queues
     with b.coordinator_lock:
         b.add(Job(at(1), noop, id="x"))
     ctl = Coordinator(ThreadLane(a, b))
     ctl.start()
-    queue, job = ctl.find("x")
-    assert queue is b and job.id == "x"
-    assert ctl.find("missing") is None
+    assert ctl.find("x", "b").id == "x"
+    assert ctl.find("x", "a") is None
+    assert ctl.find("missing", "b") is None
+    assert ctl.find("x", "nowhere") is None
 
 
-async def test_coordinator_cancels_and_pauses_a_job_across_queues(two_queues):
+async def test_coordinator_cancels_and_pauses_a_job_in_the_named_queue(two_queues):
     a, b = two_queues
     with b.coordinator_lock:
         b.add(Job(at(1), noop, id="x"))
     ctl = Coordinator(ThreadLane(a, b))
     ctl.start()
+    assert not ctl.pause_job("x", True, "a")
     with b.coordinator_lock:
-        assert ctl.pause_job("x", True) and b.get("x").disable
+        assert ctl.pause_job("x", True, "b") and b.get("x").disable
     with b.coordinator_lock:
-        assert ctl.cancel_job("x") and b.count() == 0
-    assert not ctl.pause_job("x", True) and not ctl.cancel_job("x")
+        assert ctl.cancel_job("x", "b") and b.count() == 0
+    assert not ctl.pause_job("x", True, "b") and not ctl.cancel_job("x", "b")
 
 
 async def test_next_after_stop_fails_fast(two_queues):
