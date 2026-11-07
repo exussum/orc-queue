@@ -133,17 +133,18 @@ Runs jobs from every queue in `lanes` as they come due, and supervises
 `services`. `context` is passed to every job's `fn` as `ctx`. A queue may
 belong to only one lane.
 
-| Method                                    | Does                                                                                       |
-|-------------------------------------------|--------------------------------------------------------------------------------------------|
-| `start() -> None`                         | Starts the lanes and services. Call from inside the running event loop, before `run()`.    |
-| `resume() -> None`                        | Lets jobs run. A coordinator starts paused, so setup can finish first.                     |
-| `await run() -> None`                     | Runs jobs until cancelled. Raises `ServiceFailed` if a service gives up, or a store error. |
-| `await stop() -> None`                    | Stops taking jobs, waits for the running ones to finish, then stops the services.          |
-| `lookup(name) -> JobQueue \| None`        | The queue with that name, or `None`.                                                       |
-| `find(job_id) -> (JobQueue, Job) \| None` | The queue holding that job, and the job, or `None`.                                        |
-| `cancel_job(job_id) -> bool`              | Deletes the job from whichever queue has it. `False` if none does.                         |
-| `pause_job(job_id, disable) -> bool`      | Disables or re-enables the job. `False` if no queue has it.                                |
-| `pause_queue(name) -> None`               | Pauses the named queue. Unknown names are ignored.                                         |
+| Method                                    | Does                                                                                                                                |
+|-------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `start() -> None`                         | Starts the lanes and services. Call from inside the running event loop, before `run()`.                                             |
+| `resume() -> None`                        | Lets jobs run. A coordinator starts paused, so setup can finish first.                                                              |
+| `await run() -> None`                     | Runs jobs until cancelled. Raises `ServiceFailed` if a service gives up, or a store error.                                          |
+| `await stop() -> None`                    | Stops taking jobs, waits for the running ones to finish, then stops the services; `run()` then returns.                             |
+| `shutdown(timeout) -> None`               | Calls `stop()` from any other thread and waits up to `timeout` seconds. Does nothing if it was never started or is already stopped. |
+| `lookup(name) -> JobQueue \| None`        | The queue with that name, or `None`.                                                                                                |
+| `find(job_id) -> (JobQueue, Job) \| None` | The queue holding that job, and the job, or `None`.                                                                                 |
+| `cancel_job(job_id) -> bool`              | Deletes the job from whichever queue has it. `False` if none does.                                                                  |
+| `pause_job(job_id, disable) -> bool`      | Disables or re-enables the job. `False` if no queue has it.                                                                         |
+| `pause_queue(name) -> None`               | Pauses the named queue. Unknown names are ignored.                                                                                  |
 
 The coordinator's methods take the lock themselves; don't hold it around them.
 

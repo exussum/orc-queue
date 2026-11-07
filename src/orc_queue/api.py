@@ -243,6 +243,7 @@ class Coordinator(_Queues[T]):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._failed: Optional[asyncio.Future[ServiceFailed]] = None
         self._resumed = asyncio.Event()
+        self._shut = asyncio.Event()
 
     def start(self) -> None:
         loop = asyncio.get_running_loop()
@@ -357,6 +358,11 @@ class Coordinator(_Queues[T]):
             await asyncio.gather(dispatch, return_exceptions=True)
         if failed.done():
             raise failed.result()
+        with self.lock:
+            stopped = self._stopped
+        if stopped:
+            await self._shut.wait()
+            return
         dispatch.result()
 
     async def _dispatch(self) -> None:
@@ -374,6 +380,16 @@ class Coordinator(_Queues[T]):
         for service in reversed(self.services):
             await service.stop()
         emit(self._events, m.Event.SHUTDOWN)
+        self._shut.set()
+
+    def shutdown(self, timeout: float) -> None:
+        with self.lock:
+            loop, stopped = self._loop, self._stopped
+        if not loop or stopped or loop.is_closed():
+            return
+        future = asyncio.run_coroutine_threadsafe(self.stop(), loop)
+        with contextlib.suppress(TimeoutError):
+            future.result(timeout)
 
 
 class ManualCoordinator(_Queues[T]):

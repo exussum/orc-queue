@@ -112,6 +112,27 @@ async def test_stop_finishes_what_was_already_submitted(two_queues, make_lane):
     assert [e[1] for e in finished if e[0] == "end"] == ["j0", "j1", "j2"]
 
 
+async def test_shutdown_from_another_thread_stops_the_services_and_run_returns(two_queues):
+    a, b = two_queues
+    stopped = threading.Event()
+
+    def service(stop):
+        stop.wait()
+        stopped.set()
+
+    coordinator = Coordinator(ThreadLane(a, b), services=[ThreadService(service, name="svc")])
+    coordinator.start()
+    coordinator.resume()
+    task = asyncio.create_task(coordinator.run())
+    await asyncio.sleep(0.05)
+    shutter = threading.Thread(target=coordinator.shutdown, args=(5,))
+    shutter.start()
+    assert await asyncio.wait_for(task, 5) is None
+    while shutter.is_alive():
+        await asyncio.sleep(0.01)
+    assert stopped.is_set()
+
+
 async def test_thread_lane_keeps_the_loop_responsive(two_queues):
     a, b = two_queues
     seen = []
