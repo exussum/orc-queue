@@ -133,6 +133,33 @@ async def test_shutdown_from_another_thread_stops_the_services_and_run_returns(t
     assert stopped.is_set()
 
 
+async def test_shutdown_before_resume_lets_run_return(two_queues):
+    a, b = two_queues
+    coordinator = Coordinator(ThreadLane(a, b))
+    coordinator.start()
+    task = asyncio.create_task(coordinator.run())
+    await asyncio.sleep(0.05)
+    shutter = threading.Thread(target=coordinator.shutdown, args=(5,))
+    shutter.start()
+    assert await asyncio.wait_for(task, 5) is None
+    while shutter.is_alive():
+        await asyncio.sleep(0.01)
+
+
+async def test_watch_answers_a_pending_next_when_stopped_mid_scan(two_queues):
+    a, b = two_queues
+    coordinator = Coordinator(ThreadLane(a, b))
+    coordinator.start()
+    await asyncio.sleep(0.05)
+    found = asyncio.get_running_loop().create_future()
+    with coordinator.lock:
+        coordinator._found = found
+        coordinator._stopped = True
+    coordinator._ask.set()
+    assert await asyncio.wait_for(found, 2) is None
+    await coordinator.stop()
+
+
 async def test_thread_lane_keeps_the_loop_responsive(two_queues):
     a, b = two_queues
     seen = []

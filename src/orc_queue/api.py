@@ -291,6 +291,7 @@ class Coordinator(_Queues[T]):
             self._ask.wait()
             self._ask.clear()
             if not self._running():
+                self._hand_back(self._resolve, None)
                 return
             try:
                 queue = self._wait_due()
@@ -373,6 +374,7 @@ class Coordinator(_Queues[T]):
     async def stop(self) -> None:
         with self.lock:
             self._stopped = True
+        self._resumed.set()
         self._wake.set()
         self._ask.set()
         for lane in self.lanes:
