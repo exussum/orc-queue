@@ -112,7 +112,8 @@ async def test_stop_finishes_what_was_already_submitted(two_queues, make_lane):
     assert [e[1] for e in finished if e[0] == "end"] == ["j0", "j1", "j2"]
 
 
-async def test_shutdown_from_another_thread_stops_the_services_and_run_returns(two_queues):
+@pytest.mark.parametrize("resumed", [True, False])
+async def test_shutdown_from_another_thread_stops_the_services_and_run_returns(two_queues, resumed):
     a, b = two_queues
     stopped = threading.Event()
 
@@ -122,7 +123,8 @@ async def test_shutdown_from_another_thread_stops_the_services_and_run_returns(t
 
     coordinator = Coordinator(ThreadLane(a, b), services=[ThreadService(service, name="svc")])
     coordinator.start()
-    coordinator.resume()
+    if resumed:
+        coordinator.resume()
     task = asyncio.create_task(coordinator.run())
     await asyncio.sleep(0.05)
     shutter = threading.Thread(target=coordinator.shutdown, args=(5,))
@@ -131,19 +133,6 @@ async def test_shutdown_from_another_thread_stops_the_services_and_run_returns(t
     while shutter.is_alive():
         await asyncio.sleep(0.01)
     assert stopped.is_set()
-
-
-async def test_shutdown_before_resume_lets_run_return(two_queues):
-    a, b = two_queues
-    coordinator = Coordinator(ThreadLane(a, b))
-    coordinator.start()
-    task = asyncio.create_task(coordinator.run())
-    await asyncio.sleep(0.05)
-    shutter = threading.Thread(target=coordinator.shutdown, args=(5,))
-    shutter.start()
-    assert await asyncio.wait_for(task, 5) is None
-    while shutter.is_alive():
-        await asyncio.sleep(0.01)
 
 
 async def test_watch_answers_a_pending_next_when_stopped_mid_scan(two_queues):
