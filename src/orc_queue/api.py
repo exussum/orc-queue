@@ -691,6 +691,12 @@ async def _join(thread: threading.Thread, timeout: Optional[float] = None) -> No
         await asyncio.sleep(0.01)
 
 
+def job(
+    run_at: m.AwareDatetime, fn: Callable[..., Any], payload: Optional[T] = None, *, id: Optional[str] = None, name: Optional[str] = None
+) -> m.Job[T]:
+    return m.Job(run_at, fn, payload, id=id or str(uuid.uuid4()), name=name)
+
+
 def schedule(
     cron: str, tz: tzinfo, fn: Callable[..., Any], *, id_template: str = "{uuid}", payload: Optional[T] = None, name: Optional[str] = None
 ) -> m.CronJob[T]:

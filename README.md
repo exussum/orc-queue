@@ -60,6 +60,11 @@ A one-off job.
 - `disable`: `True` skips this job; see [Pausing](#pausing).
 - `name`: a label for your own use.
 
+### `job(run_at, fn, payload=None, *, id=None, name=None) -> Job`
+
+A one-off job, as `Job` builds it, where `id=None` means a random uuid. Use
+it when the caller may or may not have an id to give.
+
 ### `schedule(cron, tz, fn, *, id_template="{uuid}", payload=None, name=None) -> CronJob`
 
 A repeating job on a cron expression, evaluated in timezone `tz`. Its first run
