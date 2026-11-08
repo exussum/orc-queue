@@ -33,11 +33,11 @@ async def test_lanes_run_in_parallel_and_serial_within(two_queues, kind):
 
     base = now()
     with a.coordinator_lock:
-        a.add(Job(base, recorder(seen, "a1-slow", block=release) if kind == "thread" else slow_async, id="a1-slow"))
+        a.add(Job(base, None, recorder(seen, "a1-slow", block=release) if kind == "thread" else slow_async, id="a1-slow"))
     with a.coordinator_lock:
-        a.add(Job(base, recorder(seen, "a2-next"), id="a2-next"))
+        a.add(Job(base, None, recorder(seen, "a2-next"), id="a2-next"))
     with b.coordinator_lock:
-        b.add(Job(base, recorder(seen, "fast"), id="fast"))
+        b.add(Job(base, None, recorder(seen, "fast"), id="fast"))
     lane_a = ThreadLane(a) if kind == "thread" else AsyncLane(a)
     coordinator = Coordinator(lane_a, ThreadLane(b))
     coordinator.resume()
@@ -65,7 +65,7 @@ async def test_lane_keeps_slot_order_across_its_queues(two_queues, make_lane, dr
     base = now()
     for i, q in enumerate([a, b, a, b]):
         with q.coordinator_lock:
-            q.add(Job(base, lambda payload: seen.append(payload), payload=f"j{i}", id=f"j{i}"))
+            q.add(Job(base, None, lambda payload: seen.append(payload), payload=f"j{i}", id=f"j{i}"))
     await drive(Coordinator(make_lane(a, b)), until=lambda: len(seen) == 4)
     assert seen == ["j0", "j2", "j1", "j3"]
 
@@ -79,9 +79,9 @@ async def test_job_exception_is_isolated(two_queues, make_lane, drive, caplog, e
 
     base = now()
     with a.coordinator_lock:
-        a.add(Job(base, bad, id="bad"))
+        a.add(Job(base, None, bad, id="bad"))
     with a.coordinator_lock:
-        a.add(Job(base, lambda payload: done.append(payload), payload="good", id="good"))
+        a.add(Job(base, None, lambda payload: done.append(payload), payload="good", id="good"))
     on(events, Event.ERROR, lambda queue, job, error: errors.append((job.id, str(error))))
     lane = make_lane(a, b)
     with caplog.at_level("ERROR", logger="orc_queue"):
@@ -96,7 +96,7 @@ async def test_stop_finishes_what_was_already_submitted(two_queues, make_lane):
     base = now()
     for i in range(3):
         with a.coordinator_lock:
-            a.add(Job(base, recorder(finished, f"j{i}", sleep=0.05), id=f"j{i}"))
+            a.add(Job(base, None, recorder(finished, f"j{i}", sleep=0.05), id=f"j{i}"))
     coordinator = Coordinator(make_lane(a, b))
     coordinator.resume()
     coordinator.start()
@@ -158,7 +158,7 @@ async def test_thread_lane_keeps_the_loop_responsive(two_queues):
         time.sleep(0.2)
 
     with a.coordinator_lock:
-        a.add(Job(now(), fn, id="x"))
+        a.add(Job(now(), None, fn, id="x"))
     coordinator = Coordinator(ThreadLane(a, b))
     coordinator.resume()
     coordinator.start()
@@ -183,9 +183,9 @@ async def test_async_lane_timeout_fails_the_job_and_continues(two_queues, drive,
 
     base = now()
     with a.coordinator_lock:
-        a.add(Job(base, hang, id="hang"))
+        a.add(Job(base, None, hang, id="hang"))
     with a.coordinator_lock:
-        a.add(Job(base, lambda payload: done.append(payload), payload="next", id="next"))
+        a.add(Job(base, None, lambda payload: done.append(payload), payload="next", id="next"))
     on(events, Event.ERROR, lambda queue, job, error: errors.append((job.id, type(error).__name__)))
     lane = AsyncLane(a, b, timeout=0.05)
     await drive(Coordinator(lane), until=lambda: done == ["next"])
@@ -223,13 +223,13 @@ async def test_fn_arguments_follow_its_signature(two_queues, make_lane, drive):
 
     base = now()
     with a.coordinator_lock:
-        a.add(Job(base, bare, id="1"))
+        a.add(Job(base, None, bare, id="1"))
     with a.coordinator_lock:
-        a.add(Job(base, with_payload, "p", id="2"))
+        a.add(Job(base, None, with_payload, "p", id="2"))
     with a.coordinator_lock:
-        a.add(Job(base, with_ctx, id="3"))
+        a.add(Job(base, None, with_ctx, id="3"))
     with a.coordinator_lock:
-        a.add(Job(base, with_both, "d", id="4"))
+        a.add(Job(base, None, with_both, "d", id="4"))
     await drive(Coordinator(make_lane(a, b), context=context), until=lambda: len(calls) == 4)
     assert calls == [("bare",), ("payload", "p"), ("ctx", context), ("both", "d", context)]
 
@@ -238,7 +238,7 @@ async def test_coordinator_starts_paused_until_resumed(two_queues, drive):
     a, b = two_queues
     ran = []
     with a.coordinator_lock:
-        a.add(Job(now(), lambda: ran.append(1), id="x"))
+        a.add(Job(now(), None, lambda: ran.append(1), id="x"))
     coordinator = Coordinator(AsyncLane(a, b))
     assert not a.paused and not b.paused
     coordinator.start()
@@ -259,7 +259,7 @@ async def test_coordinator_starts_paused_until_resumed(two_queues, drive):
 async def test_a_store_error_during_a_pop_ends_run(lock, wake, events):
     q = JobQueue(lock, wake, FlakyStore(MemoryStore(), {"delete"}), 100, events, name="q")
     with q.coordinator_lock:
-        q.add(Job(now(), noop, id="x"))
+        q.add(Job(now(), None, noop, id="x"))
     coordinator = Coordinator(ThreadLane(q))
     coordinator.resume()
     with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):

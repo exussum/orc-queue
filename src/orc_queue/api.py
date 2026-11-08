@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import asyncio
 import contextlib
 import functools
@@ -76,7 +77,7 @@ class JobQueue(Generic[T]):
         self.cap = cap or math.inf
         self.on_full = on_full
 
-    def add(self, job: m.Job[T]) -> bool:
+    def add(self, job: m.AnyJob[T]) -> bool:
         new = not self._store.get(job.id)
         if new:
             size = self._store.count()
@@ -88,7 +89,7 @@ class JobQueue(Generic[T]):
         emit(self.events, m.Event.ADDED if new else m.Event.MODIFIED, queue=self, job=job)
         return True
 
-    def _evict(self, incoming: m.Job[T]) -> bool:
+    def _evict(self, incoming: m.AnyJob[T]) -> bool:
         victim = next((j for j in self._store.all() if evictable(j)), None)
         if not victim:
             return False
@@ -97,17 +98,17 @@ class JobQueue(Generic[T]):
         emit(self.events, m.Event.REMOVED, queue=self, job=victim)
         return True
 
-    def update(self, job: m.Job[T]) -> None:
+    def update(self, job: m.AnyJob[T]) -> None:
         if not self._store.get(job.id):
             raise KeyError(job.id)
         self._store.put(job)
         self.changed.set()
         emit(self.events, m.Event.MODIFIED, queue=self, job=job)
 
-    def get(self, job_id: str) -> Optional[m.Job[T]]:
+    def get(self, job_id: str) -> Optional[m.AnyJob[T]]:
         return self._store.get(job_id)
 
-    def remove(self, job_id: str) -> m.Job[T]:
+    def remove(self, job_id: str) -> m.AnyJob[T]:
         job = self._store.get(job_id)
         if not job:
             raise KeyError(job_id)
@@ -116,32 +117,32 @@ class JobQueue(Generic[T]):
         emit(self.events, m.Event.REMOVED, queue=self, job=job)
         return job
 
-    def pop(self) -> Optional[m.Job[T]]:
+    def pop(self) -> Optional[m.AnyJob[T]]:
         job = self.next_job()
         if not job or self._paused or job.run_at > m.utcnow():
             return None
-        self._store.delete(job.id)
-        successor = next_instance(job, after=m.utcnow())
-        if successor:
-            self._store.put(successor)
+        self._iterate(job, m.utcnow())
         return job
 
-    def next_job(self) -> Optional[m.Job[T]]:
+    def next_job(self) -> Optional[m.AnyJob[T]]:
         now = m.utcnow()
         dropped = []
-        for job in self._store.skipped(now):
-            self._store.delete(job.id)
-            successor = next_instance(job, after=now)
-            if successor:
-                self._store.put(successor)
-            else:
+        for job in self._store.droppable(now):
+            if not self._iterate(job, now):
                 dropped.append(job.id)
                 emit(self.events, m.Event.REMOVED, queue=self, job=job)
         if dropped:
-            _log.info("queue %r: deleted skipped disabled jobs: %s", self.name, ", ".join(dropped))
+            _log.info("queue %r: deleted jobs that will not run: %s", self.name, ", ".join(dropped))
         return self._store.first()
 
-    def jobs(self) -> list[m.Job[T]]:
+    def _iterate(self, job: m.AnyJob[T], now: m.AwareDatetime) -> Optional[m.AnyJob[T]]:
+        self._store.delete(job.id)
+        successor = next_instance(job, after=now)
+        if successor:
+            self._store.put(successor)
+        return successor
+
+    def jobs(self) -> list[m.AnyJob[T]]:
         return self._store.all()
 
     def reset(self) -> None:
@@ -188,7 +189,7 @@ class _Queues(Generic[T]):
     def lookup(self, name: str) -> Optional[JobQueue[T]]:
         return next((queue for queue in self.queues if queue.name == name), None)
 
-    def find(self, job_id: str, name: str) -> Optional[m.Job[T]]:
+    def find(self, job_id: str, name: str) -> Optional[m.AnyJob[T]]:
         with self.lock:
             queue = self.lookup(name)
             return queue.get(job_id) if queue else None
@@ -254,7 +255,7 @@ class Coordinator(_Queues[T]):
         self._thread.start()
         emit(self._events, m.Event.STARTED)
 
-    async def next(self) -> tuple[JobQueue[T], m.Job[T]]:
+    async def next(self) -> tuple[JobQueue[T], m.AnyJob[T]]:
         loop = asyncio.get_running_loop()
         while True:
             with self.lock:
@@ -422,7 +423,7 @@ class ManualCoordinator(_Queues[T]):
         tick(until)
 
 
-class ThreadLane(Generic[T]):
+class Lane(abc.ABC, Generic[T]):
     def __init__(self, *queues: JobQueue[T]) -> None:
         if not queues:
             raise ValueError("a lane needs at least one queue")
@@ -431,7 +432,38 @@ class ThreadLane(Generic[T]):
         self.context: Any = None
         self._lock = queues[0].coordinator_lock
         self._wake = queues[0].changed
-        self._handed: Optional[tuple[JobQueue[T], m.Job[T]]] = None
+
+    @abc.abstractmethod
+    def start(self) -> None: ...
+
+    @abc.abstractmethod
+    def submit(self, queue: JobQueue[T], job: m.AnyJob[T]) -> None: ...
+
+    @abc.abstractmethod
+    async def stop(self) -> None: ...
+
+    def _done(self, queue: JobQueue[T], job: m.AnyJob[T], exc: Optional[Exception]) -> None:
+        if exc:
+            _log.error("job %s on queue %r failed", job.id, queue.name, exc_info=exc)
+            self._report(queue, m.Event.ERROR, job=job, error=exc)
+        else:
+            self._report(queue, m.Event.EXECUTED, job=job)
+        with self._lock:
+            self.busy = False
+        self._wake.set()
+
+    def _report(self, queue: JobQueue[T], event: m.Event, **info: Any) -> None:
+        try:
+            with self._lock:
+                emit(queue.events, event, queue=queue, **info)
+        except Exception:
+            _log.exception("%s listener raised for job %s on queue %r", event, info["job"].id, queue.name)
+
+
+class ThreadLane(Lane[T]):
+    def __init__(self, *queues: JobQueue[T]) -> None:
+        super().__init__(*queues)
+        self._handed: Optional[tuple[JobQueue[T], m.AnyJob[T]]] = None
         self._ready = threading.Event()
         self._stopping = threading.Event()
         self._thread = threading.Thread(target=self._serve, name="lane", daemon=True)
@@ -439,7 +471,7 @@ class ThreadLane(Generic[T]):
     def start(self) -> None:
         self._thread.start()
 
-    def submit(self, queue: JobQueue[T], job: m.Job[T]) -> None:
+    def submit(self, queue: JobQueue[T], job: m.AnyJob[T]) -> None:
         with self._lock:
             self._handed = (queue, job)
         self._ready.set()
@@ -460,44 +492,26 @@ class ThreadLane(Generic[T]):
             if self._stopping.is_set():
                 return
 
-    def _call(self, queue: JobQueue[T], job: m.Job[T]) -> None:
+    def _call(self, queue: JobQueue[T], job: m.AnyJob[T]) -> None:
         job.context = self.context
+        exc: Optional[Exception] = None
         try:
             run(job)
-        except Exception as exc:
-            _log.exception("job %s on queue %r failed", job.id, queue.name)
-            self._report(queue, m.Event.ERROR, job=job, error=exc)
-        else:
-            self._report(queue, m.Event.EXECUTED, job=job)
-        finally:
-            with self._lock:
-                self.busy = False
-            self._wake.set()
-
-    def _report(self, queue: JobQueue[T], event: m.Event, **info: Any) -> None:
-        try:
-            with self._lock:
-                emit(queue.events, event, queue=queue, **info)
-        except Exception:
-            _log.exception("%s listener raised for job %s on queue %r", event, info["job"].id, queue.name)
+        except Exception as e:
+            exc = e
+        self._done(queue, job, exc)
 
 
-class AsyncLane(Generic[T]):
+class AsyncLane(Lane[T]):
     def __init__(self, *queues: JobQueue[T], timeout: Optional[float] = None) -> None:
-        if not queues:
-            raise ValueError("a lane needs at least one queue")
-        self.queues = queues
-        self.busy = False
-        self.context: Any = None
-        self._lock = queues[0].coordinator_lock
-        self._wake = queues[0].changed
+        super().__init__(*queues)
         self._timeout = timeout
         self._task: Optional[asyncio.Task[None]] = None
 
     def start(self) -> None:
         return None
 
-    def submit(self, queue: JobQueue[T], job: m.Job[T]) -> None:
+    def submit(self, queue: JobQueue[T], job: m.AnyJob[T]) -> None:
         self._task = asyncio.get_running_loop().create_task(self._execute(queue, job))
 
     async def stop(self) -> None:
@@ -506,27 +520,17 @@ class AsyncLane(Generic[T]):
                 await self._task
         self._task = None
 
-    async def _execute(self, queue: JobQueue[T], job: m.Job[T]) -> None:
+    async def _execute(self, queue: JobQueue[T], job: m.AnyJob[T]) -> None:
         job.context = self.context
+        exc: Optional[Exception] = None
         try:
             async with asyncio.timeout(self._timeout):
                 result = run(job)
                 if inspect.isawaitable(result):
                     await result
-        except Exception as exc:
-            _log.exception("job %s on queue %r failed", job.id, queue.name)
-            with self._lock:
-                emit(queue.events, m.Event.ERROR, queue=queue, job=job, error=exc)
-        else:
-            with self._lock:
-                emit(queue.events, m.Event.EXECUTED, queue=queue, job=job)
-        finally:
-            with self._lock:
-                self.busy = False
-            self._wake.set()
-
-
-Lane = ThreadLane[T] | AsyncLane[T]
+        except Exception as e:
+            exc = e
+        self._done(queue, job, exc)
 
 
 class ServiceFailed(RuntimeError):
@@ -536,7 +540,7 @@ class ServiceFailed(RuntimeError):
         self.__cause__ = cause
 
 
-class Service:
+class Service(abc.ABC):
     def __init__(
         self, fn: Callable[..., Any], *, name: Optional[str] = None, restart_after: float = 1.0, stop_timeout: float = 10.0
     ) -> None:
@@ -553,8 +557,8 @@ class Service:
         self._loop = loop
         self._failed = failed
 
-    async def stop(self) -> None:
-        raise NotImplementedError
+    @abc.abstractmethod
+    async def stop(self) -> None: ...
 
     def _exited(self, started: float, stopped: bool, exc: Optional[BaseException]) -> bool:
         if stopped:
@@ -659,22 +663,29 @@ def emit(events: m.Events, event: m.Event, **info: Any) -> None:
         fn(**info)
 
 
-def run(job: m.Job[Any]) -> Any:
+def run(job: m.AnyJob[Any]) -> Any:
     params = inspect.signature(job.fn).parameters
     offered = {"ctx": job.context, "payload": job.payload}
     return job.fn(**{name: value for name, value in offered.items() if name in params})
 
 
-def evictable(job: m.Job[Any]) -> bool:
+def evictable(job: m.AnyJob[Any]) -> bool:
     return not isinstance(job, m.CronJob)
 
 
-def next_instance(job: m.Job[T], after: Optional[m.AwareDatetime] = None) -> Optional[m.Job[T]]:
+def next_instance(job: m.AnyJob[T], after: Optional[m.AwareDatetime] = None) -> Optional[m.AnyJob[T]]:
     if not isinstance(job, m.CronJob):
         return None
     start = max(job.run_at, after or m.utcnow()).astimezone(job.run_at.tzinfo)
     run_at = m.aware(next(CronSim(job.cron, start)), "run_at")
     return replace(job, run_at=run_at, id=job.id_template.format(uuid=uuid.uuid4()))
+
+
+def schedule(
+    cron: str, tz: tzinfo, fn: Callable[..., Any], *, id_template: str = "{uuid}", payload: Optional[T] = None, name: Optional[str] = None
+) -> m.CronJob[T]:
+    first = m.aware(next(CronSim(cron, m.utcnow().astimezone(tz))), "run_at")
+    return m.CronJob(first, fn, payload=payload, id=id_template.format(uuid=uuid.uuid4()), name=name, cron=cron, id_template=id_template)
 
 
 def _earliest(queues: Iterable[JobQueue[T]]) -> Optional[tuple[m.AwareDatetime, JobQueue[T]]]:
@@ -686,16 +697,3 @@ async def _join(thread: threading.Thread, timeout: Optional[float] = None) -> No
     deadline = None if timeout is None else time.monotonic() + timeout
     while thread.is_alive() and (deadline is None or time.monotonic() < deadline):
         await asyncio.sleep(0.01)
-
-
-def job(
-    run_at: m.AwareDatetime, fn: Callable[..., Any], payload: Optional[T] = None, *, id: Optional[str] = None, name: Optional[str] = None
-) -> m.Job[T]:
-    return m.Job(run_at, fn, payload, id=id or str(uuid.uuid4()), name=name)
-
-
-def schedule(
-    cron: str, tz: tzinfo, fn: Callable[..., Any], *, id_template: str = "{uuid}", payload: Optional[T] = None, name: Optional[str] = None
-) -> m.CronJob[T]:
-    first = m.aware(next(CronSim(cron, m.utcnow().astimezone(tz))), "run_at")
-    return m.CronJob(first, fn, payload=payload, id=id_template.format(uuid=uuid.uuid4()), name=name, cron=cron, id_template=id_template)

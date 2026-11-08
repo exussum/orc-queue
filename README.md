@@ -17,7 +17,9 @@ listeners = Events()
 
 greetings = JobQueue(coordinator_lock=shared_lock, changed=changed, store=MemoryStore(), cap=0, events=listeners, name="greetings")
 with greetings.coordinator_lock:
-    greetings.add(Job(run_at=utcnow() + timedelta(seconds=2), fn=lambda payload: print("ran", payload), payload="hello", id="greet"))
+    greetings.add(
+        Job(run_at=utcnow() + timedelta(seconds=2), expires_at=None, fn=lambda payload: print("ran", payload), payload="hello", id="greet")
+    )
 
 coordinator = Coordinator(ThreadLane(greetings))
 
@@ -44,7 +46,7 @@ calls makes them atomic.
 
 ## Jobs
 
-### `Job(run_at, fn, payload=None, id=..., disable=False, name=None)`
+### `Job(run_at, expires_at, fn, payload=None, id=..., disable=False, name=None)`
 
 A one-off job.
 
@@ -60,10 +62,16 @@ A one-off job.
 - `disable`: `True` skips this job; see [Pausing](#pausing).
 - `name`: a label for your own use.
 
-### `job(run_at, fn, payload=None, *, id=None, name=None) -> Job`
+`expires_at` is a deadline, timezone-aware, or `None` for a job that never
+expires. A job the queue reaches after its `expires_at` is dropped instead of
+run, and a `REMOVED` event fires. Use it for work that is pointless once it is
+late: a job whose turn comes after a long pause, or one left behind by a
+restart. An expired job is swept on the next pass over the queue, the same pass
+that clears disabled jobs whose time has gone by, so `next_job()` never offers
+one. Compare `SqliteStore`'s `discard_after`, which drops overdue jobs once, at
+startup, for the whole store.
 
-A one-off job, as `Job` builds it, where `id=None` means a random uuid. Use
-it when the caller may or may not have an id to give.
+A `CronJob` has no `expires_at`: a repeating job never expires.
 
 ### `schedule(cron, tz, fn, *, id_template="{uuid}", payload=None, name=None) -> CronJob`
 
@@ -198,17 +206,17 @@ task.
 `Events()` holds listeners. Subscribe with `on(events, Event.ADDED, fn)`; `fn`
 is called with keyword arguments.
 
-| Event                        | Fires when                           | Arguments               |
-|------------------------------|--------------------------------------|-------------------------|
-| `STARTED`                    | the coordinator starts               | none                    |
-| `SHUTDOWN`                   | the coordinator has stopped          | none                    |
-| `ADDED`                      | a job is added                       | `queue`, `job`          |
-| `MODIFIED`                   | a job is replaced or updated         | `queue`, `job`          |
-| `REMOVED`                    | a job is removed, evicted or skipped | `queue`, `job`          |
-| `SUBMITTED`                  | a job is handed to its lane to run   | `queue`, `job`          |
-| `EXECUTED`                   | a job finished                       | `queue`, `job`          |
-| `ERROR`                      | a job raised                         | `queue`, `job`, `error` |
-| `PAUSED`, `RESUMED`, `RESET` | a queue is paused, resumed or reset  | `queue`                 |
+| Event                        | Fires when                                    | Arguments               |
+|------------------------------|-----------------------------------------------|-------------------------|
+| `STARTED`                    | the coordinator starts                        | none                    |
+| `SHUTDOWN`                   | the coordinator has stopped                   | none                    |
+| `ADDED`                      | a job is added                                | `queue`, `job`          |
+| `MODIFIED`                   | a job is replaced or updated                  | `queue`, `job`          |
+| `REMOVED`                    | a job is removed, evicted, expired or skipped | `queue`, `job`          |
+| `SUBMITTED`                  | a job is handed to its lane to run            | `queue`, `job`          |
+| `EXECUTED`                   | a job finished                                | `queue`, `job`          |
+| `ERROR`                      | a job raised                                  | `queue`, `job`, `error` |
+| `PAUSED`, `RESUMED`, `RESET` | a queue is paused, resumed or reset           | `queue`                 |
 
 Listeners run while the lock is held: keep them short, and don't wait on
 another thread that uses a queue.

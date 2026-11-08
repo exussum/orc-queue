@@ -93,7 +93,7 @@ async def test_services_start_before_the_scan_and_stop_after_lanes(lock, wake, d
         order.append(payload)
 
     with q.coordinator_lock:
-        q.add(Job(at(0), job, payload="job", id="j"))
+        q.add(Job(at(0), None, job, payload="job", id="j"))
     coordinator = Coordinator(AsyncLane(q), services=[AsyncService(svc)])
     await drive(coordinator, seconds=0.02)
     assert order == ["service-start", "job", "service-stop"]

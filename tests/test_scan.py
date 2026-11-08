@@ -12,13 +12,13 @@ async def test_takes_earliest_due_across_queues_ties_by_queue_order(two_queues, 
     freezegun_clock.move_to(at(10))
     a, b = two_queues
     with a.coordinator_lock:
-        a.add(Job(at(9), noop, id="a1"))
+        a.add(Job(at(9), None, noop, id="a1"))
     with a.coordinator_lock:
-        a.add(Job(at(8), noop, id="y"))
+        a.add(Job(at(8), None, noop, id="y"))
     with b.coordinator_lock:
-        b.add(Job(at(8), noop, id="x"))
+        b.add(Job(at(8), None, noop, id="x"))
     with b.coordinator_lock:
-        b.add(Job(at(12), noop, id="b2"))
+        b.add(Job(at(12), None, noop, id="b2"))
     ctl = Coordinator(ThreadLane(a, b))
     ctl.start()
     taken = [await ctl.next() for _ in range(3)]
@@ -30,7 +30,7 @@ async def test_takes_earliest_due_across_queues_ties_by_queue_order(two_queues, 
 async def test_sleeps_until_due(two_queues):
     a, b = two_queues
     with b.coordinator_lock:
-        b.add(Job(now() + timedelta(seconds=0.15), noop, id="soon"))
+        b.add(Job(now() + timedelta(seconds=0.15), None, noop, id="soon"))
     ctl = Coordinator(ThreadLane(a, b))
     ctl.start()
     queue, job = await ctl.next()
@@ -40,13 +40,13 @@ async def test_sleeps_until_due(two_queues):
 async def test_add_of_an_earlier_job_wakes_the_scan(two_queues):
     a, b = two_queues
     with a.coordinator_lock:
-        a.add(Job(now() + timedelta(seconds=5), noop, id="far"))
+        a.add(Job(now() + timedelta(seconds=5), None, noop, id="far"))
     ctl = Coordinator(ThreadLane(a, b))
     ctl.start()
     task = asyncio.create_task(ctl.next())
     await asyncio.sleep(0.02)
     with b.coordinator_lock:
-        b.add(Job(now(), noop, id="now"))
+        b.add(Job(now(), None, noop, id="now"))
     queue, job = await asyncio.wait_for(task, 1)
     assert queue is b and job.id == "now"
 
@@ -55,13 +55,13 @@ async def test_skips_paused_queues_until_resumed(two_queues, freezegun_clock):
     freezegun_clock.move_to(at(10))
     a, b = two_queues
     with a.coordinator_lock:
-        a.add(Job(at(1), noop, id="a1"))
+        a.add(Job(at(1), None, noop, id="a1"))
     with a.coordinator_lock:
         a.pause()
     with b.coordinator_lock:
-        b.add(Job(at(2), noop, id="b-disabled", disable=True))
+        b.add(Job(at(2), None, noop, id="b-disabled", disable=True))
     with b.coordinator_lock:
-        b.add(Job(at(3), noop, id="b1"))
+        b.add(Job(at(3), None, noop, id="b1"))
     ctl = Coordinator(ThreadLane(a, b))
     ctl.start()
     assert (await ctl.next())[1].id == "b1"
@@ -84,7 +84,7 @@ async def test_coordinator_finds_queues_by_name(two_queues):
 async def test_coordinator_finds_a_job_in_the_named_queue(two_queues):
     a, b = two_queues
     with b.coordinator_lock:
-        b.add(Job(at(1), noop, id="x"))
+        b.add(Job(at(1), None, noop, id="x"))
     ctl = Coordinator(ThreadLane(a, b))
     ctl.start()
     assert ctl.find("x", "b").id == "x"
@@ -96,7 +96,7 @@ async def test_coordinator_finds_a_job_in_the_named_queue(two_queues):
 async def test_coordinator_cancels_and_pauses_a_job_in_the_named_queue(two_queues):
     a, b = two_queues
     with b.coordinator_lock:
-        b.add(Job(at(1), noop, id="x"))
+        b.add(Job(at(1), None, noop, id="x"))
     ctl = Coordinator(ThreadLane(a, b))
     ctl.start()
     assert not ctl.pause_job("x", True, "a")
@@ -117,7 +117,7 @@ async def test_next_after_stop_fails_fast(two_queues):
 async def test_a_store_error_during_a_scan_comes_out_of_next(lock, wake, events):
     q = JobQueue(lock, wake, FlakyStore(MemoryStore(), {"first"}), 100, events, name="q")
     with q.coordinator_lock:
-        q.add(Job(at(1), noop, id="x"))
+        q.add(Job(at(1), None, noop, id="x"))
     ctl = Coordinator(ThreadLane(q))
     ctl.start()
     with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):

@@ -139,7 +139,7 @@ async def producer(
         payload = {"id": jid, "queue": queue.name, "sleep": rng.uniform(0, 2), "run_at": run_at, "raise": rng.random() < 0.03}
         fn = nap_async if kind == "async" else nap
         with queue.coordinator_lock:
-            added = queue.add(Job(run_at, fn, payload, id=jid))
+            added = queue.add(Job(run_at, None, fn, payload, id=jid))
         if added:
             stats["added"] += 1
         else:

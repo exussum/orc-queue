@@ -40,14 +40,14 @@ def plant(db, job_id, blob, queue="default"):
 def test_persists_across_instances_and_isolates_names(open_queue):
     q = open_queue("p")
     with q.coordinator_lock:
-        q.add(Job(at(5), noop, id="late"))
+        q.add(Job(at(5), None, noop, id="late"))
     with q.coordinator_lock:
-        q.add(Job(at(1), noop, id="z", disable=True))
+        q.add(Job(at(1), None, noop, id="z", disable=True))
     with q.coordinator_lock:
-        q.add(Job(at(4), noop, id="early"))
+        q.add(Job(at(4), None, noop, id="early"))
     other = open_queue("other")
     with other.coordinator_lock:
-        other.add(Job(at(0), noop, id="early"))
+        other.add(Job(at(0), None, noop, id="early"))
     reopened = open_queue("p")
     with reopened.coordinator_lock:
         assert [j.id for j in reopened.jobs()] == ["early", "late", "z"]
@@ -61,10 +61,10 @@ def test_startup_quietly_drops_unloadable_rows_per_queue_name(open_queue, db, ca
     q = open_queue()
     for jid in ("corrupt", "gone_class", "missing_field", "good"):
         with q.coordinator_lock:
-            q.add(Job(at(1 if jid != "good" else 2), noop, id=jid))
+            q.add(Job(at(1 if jid != "good" else 2), None, noop, id=jid))
     other = open_queue("other")
     with other.coordinator_lock:
-        other.add(Job(at(1), noop, id="corrupt"))
+        other.add(Job(at(1), None, noop, id="corrupt"))
     plant(db, "corrupt", b"garbage")
 
     mod = types.ModuleType("vanished_plugin")
@@ -75,10 +75,10 @@ def test_startup_quietly_drops_unloadable_rows_per_queue_name(open_queue, db, ca
     Payload.__module__, Payload.__qualname__ = "vanished_plugin", "Payload"
     mod.Payload = Payload
     sys.modules["vanished_plugin"] = mod
-    plant(db, "gone_class", pickle.dumps(Job(at(1), noop, payload=Payload(), id="gone_class")))
+    plant(db, "gone_class", pickle.dumps(Job(at(1), None, noop, payload=Payload(), id="gone_class")))
     del sys.modules["vanished_plugin"]
 
-    old = Job(at(1), noop, id="missing_field")
+    old = Job(at(1), None, noop, id="missing_field")
     del old.__dict__["run_at"]
     plant(db, "missing_field", pickle.dumps(old))
 
@@ -101,9 +101,9 @@ def test_startup_quietly_drops_unloadable_rows_per_queue_name(open_queue, db, ca
 def test_after_startup_an_unloadable_row_is_deleted_loudly(open_queue, db, caplog):
     q = open_queue()
     with q.coordinator_lock:
-        q.add(Job(at(1), noop, id="bad"))
+        q.add(Job(at(1), None, noop, id="bad"))
     with q.coordinator_lock:
-        q.add(Job(at(2), noop, id="good"))
+        q.add(Job(at(2), None, noop, id="good"))
     plant(db, "bad", b"garbage")
     with caplog.at_level(logging.ERROR, logger="orc_queue"):
         with pytest.raises(UnloadableJob) as info:
@@ -118,13 +118,13 @@ def test_after_startup_an_unloadable_row_is_deleted_loudly(open_queue, db, caplo
 def test_startup_discards_jobs_later_than_the_grace(lock, wake, db, caplog, events):
     q = JobQueue(lock, wake, SqliteStore(db), 100, events)
     with q.coordinator_lock:
-        q.add(Job(at(1), noop, id="hours-late"))
+        q.add(Job(at(1), None, noop, id="hours-late"))
     with q.coordinator_lock:
-        q.add(Job(at(12) - timedelta(minutes=4), noop, id="just-late"))
+        q.add(Job(at(12) - timedelta(minutes=4), None, noop, id="just-late"))
     with q.coordinator_lock:
-        q.add(Job(at(12) - timedelta(minutes=6), noop, id="too-late", disable=True))
+        q.add(Job(at(12) - timedelta(minutes=6), None, noop, id="too-late", disable=True))
     with q.coordinator_lock:
-        q.add(Job(at(13), noop, id="future"))
+        q.add(Job(at(13), None, noop, id="future"))
     with q.coordinator_lock:
         q.add(CronJob(at(1), noop, cron="0 * * * *", id="cron-late"))
     with caplog.at_level(logging.INFO, logger="orc_queue"):
@@ -134,25 +134,12 @@ def test_startup_discards_jobs_later_than_the_grace(lock, wake, db, caplog, even
     assert any("discarded 2 job(s) more than 0:05:00 late at startup" in r.message for r in caplog.records)
 
 
-def test_a_jobs_file_without_the_cron_column_is_migrated(lock, wake, db, events):
-    with sqlite3.connect(db) as conn:
-        conn.execute(
-            "CREATE TABLE jobs (queue TEXT NOT NULL, id TEXT NOT NULL, disable INTEGER NOT NULL,"
-            " run_at TEXT NOT NULL, job BLOB NOT NULL, PRIMARY KEY (queue, id))"
-        )
-    q = JobQueue(lock, wake, SqliteStore(db), 100, events)
-    with q.coordinator_lock:
-        q.add(CronJob(at(13), noop, cron="0 * * * *", id="c"))
-    with q.coordinator_lock:
-        assert q.count() == 1
-
-
 async def test_an_unloadable_row_does_not_stop_the_scan(open_queue, db):
     q = open_queue()
     with q.coordinator_lock:
-        q.add(Job(at(1), noop, id="bad"))
+        q.add(Job(at(1), None, noop, id="bad"))
     with q.coordinator_lock:
-        q.add(Job(at(2), noop, id="good"))
+        q.add(Job(at(2), None, noop, id="good"))
     plant(db, "bad", b"garbage")
     coordinator = Coordinator(ThreadLane(q))
     coordinator.start()

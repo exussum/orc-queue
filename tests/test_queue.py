@@ -31,11 +31,11 @@ def test_empty(queue):
 
 def test_orders_by_time_then_id_across_timezones(queue):
     with queue.coordinator_lock:
-        queue.add(Job(at(12), noop, id="b"))
+        queue.add(Job(at(12), None, noop, id="b"))
     with queue.coordinator_lock:
-        queue.add(Job(at(12), noop, id="a"))
+        queue.add(Job(at(12), None, noop, id="a"))
     with queue.coordinator_lock:
-        queue.add(Job(datetime(2026, 11, 1, 4, tzinfo=ZoneInfo("America/New_York")), noop, id="ny"))
+        queue.add(Job(datetime(2026, 11, 1, 4, tzinfo=ZoneInfo("America/New_York")), None, noop, id="ny"))
     with queue.coordinator_lock:
         assert (queue.get("ny")).run_at.tzinfo == ZoneInfo("America/New_York")
     assert drain(queue) == ["ny", "a", "b"]
@@ -43,11 +43,11 @@ def test_orders_by_time_then_id_across_timezones(queue):
 
 def test_add_replaces_existing_id(queue):
     with queue.coordinator_lock:
-        queue.add(Job(at(5), noop, payload="old", id="a"))
+        queue.add(Job(at(5), None, noop, payload="old", id="a"))
     with queue.coordinator_lock:
-        queue.add(Job(at(1), noop, id="b"))
+        queue.add(Job(at(1), None, noop, id="b"))
     with queue.coordinator_lock:
-        queue.add(Job(at(0), noop, payload="new", id="a"))
+        queue.add(Job(at(0), None, noop, payload="new", id="a"))
     with queue.coordinator_lock:
         assert queue.count() == 2
     with queue.coordinator_lock:
@@ -57,11 +57,11 @@ def test_add_replaces_existing_id(queue):
 
 
 def test_update_reorders_and_requires_existing(queue):
-    a = Job(at(9), noop, id="a")
+    a = Job(at(9), None, noop, id="a")
     with queue.coordinator_lock:
         queue.add(a)
     with queue.coordinator_lock:
-        queue.add(Job(at(12), noop, id="b"))
+        queue.add(Job(at(12), None, noop, id="b"))
     a.run_at = at(13)
     with queue.coordinator_lock:
         queue.update(a)
@@ -69,12 +69,12 @@ def test_update_reorders_and_requires_existing(queue):
         assert (queue.next_job()).id == "b"
     with pytest.raises(KeyError):
         with queue.coordinator_lock:
-            queue.update(Job(at(1), noop, id="missing"))
+            queue.update(Job(at(1), None, noop, id="missing"))
 
 
 def test_get_remove_contains(queue):
     with queue.coordinator_lock:
-        queue.add(Job(at(1), noop, payload={"k": 1}, id="a"))
+        queue.add(Job(at(1), None, noop, payload={"k": 1}, id="a"))
     with queue.coordinator_lock:
         assert (queue.get("a")).payload == {"k": 1}
     with queue.coordinator_lock:
@@ -90,7 +90,7 @@ def test_get_remove_contains(queue):
 
 def test_pause_blocks_pop_but_reports_next(queue):
     with queue.coordinator_lock:
-        queue.add(Job(at(1), noop, id="a"))
+        queue.add(Job(at(1), None, noop, id="a"))
     with queue.coordinator_lock:
         queue.pause()
     assert queue.paused and at(12) <= queue.paused_at <= now()
@@ -113,7 +113,7 @@ def test_pause_blocks_pop_but_reports_next(queue):
 
 def test_reset_keeps_cron_jobs(queue):
     with queue.coordinator_lock:
-        queue.add(Job(at(13), noop, id="once"))
+        queue.add(Job(at(13), None, noop, id="once"))
         queue.add(schedule("0 * * * *", timezone.utc, noop, id_template="hourly"))
     with queue.coordinator_lock:
         queue.reset()
@@ -124,7 +124,7 @@ def test_reset_keeps_cron_jobs(queue):
 def test_pop_declines_a_job_not_yet_due(queue, freezegun_clock):
     freezegun_clock.move_to(at(1))
     with queue.coordinator_lock:
-        queue.add(Job(at(3), noop, id="later"))
+        queue.add(Job(at(3), None, noop, id="later"))
     with queue.coordinator_lock:
         assert queue.pop() is None
     freezegun_clock.move_to(at(3))
@@ -135,13 +135,13 @@ def test_pop_declines_a_job_not_yet_due(queue, freezegun_clock):
 def test_next_job_deletes_the_disabled_jobs_whose_time_has_passed(queue, caplog, freezegun_clock):
     freezegun_clock.move_to(at(5))
     with queue.coordinator_lock:
-        queue.add(Job(at(1), noop, id="p1", disable=True))
+        queue.add(Job(at(1), None, noop, id="p1", disable=True))
     with queue.coordinator_lock:
-        queue.add(Job(at(2), noop, id="p2", disable=True))
+        queue.add(Job(at(2), None, noop, id="p2", disable=True))
     with queue.coordinator_lock:
-        queue.add(Job(at(3), noop, id="live"))
+        queue.add(Job(at(3), None, noop, id="live"))
     with queue.coordinator_lock:
-        queue.add(Job(at(9), noop, id="p-later", disable=True))
+        queue.add(Job(at(9), None, noop, id="p-later", disable=True))
     with queue.coordinator_lock:
         assert [j.id for j in queue.jobs()] == ["live", "p1", "p2", "p-later"]
     with caplog.at_level(logging.INFO, logger="orc_queue"):
@@ -149,7 +149,7 @@ def test_next_job_deletes_the_disabled_jobs_whose_time_has_passed(queue, caplog,
             assert (queue.next_job()).id == "live"
     with queue.coordinator_lock:
         assert [j.id for j in queue.jobs()] == ["live", "p-later"]
-    assert any("deleted skipped disabled jobs" in r.message and "p1" in r.message and "p2" in r.message for r in caplog.records)
+    assert any("deleted jobs that will not run" in r.message and "p1" in r.message and "p2" in r.message for r in caplog.records)
     with queue.coordinator_lock:
         queue.pause()
     with queue.coordinator_lock:
@@ -171,9 +171,9 @@ def test_dropping_a_skipped_disabled_job_emits_removed(queue, freezegun_clock):
     removed = []
     on(queue.events, Event.REMOVED, lambda queue, job: removed.append(job.id))
     with queue.coordinator_lock:
-        queue.add(Job(at(1), noop, id="gone", disable=True))
+        queue.add(Job(at(1), None, noop, id="gone", disable=True))
     with queue.coordinator_lock:
-        queue.add(Job(at(9), noop, id="kept", disable=True))
+        queue.add(Job(at(9), None, noop, id="kept", disable=True))
     with queue.coordinator_lock:
         assert queue.next_job() is None
     assert removed == ["gone"]
@@ -182,9 +182,9 @@ def test_dropping_a_skipped_disabled_job_emits_removed(queue, freezegun_clock):
 def test_a_disabled_job_waits_for_its_time_before_it_is_dropped(queue, freezegun_clock):
     freezegun_clock.move_to(at(5))
     with queue.coordinator_lock:
-        queue.add(Job(at(1), noop, id="a", disable=True))
+        queue.add(Job(at(1), None, noop, id="a", disable=True))
     with queue.coordinator_lock:
-        queue.add(Job(at(9), noop, id="b", disable=True))
+        queue.add(Job(at(9), None, noop, id="b", disable=True))
     with queue.coordinator_lock:
         assert queue.next_job() is None and [j.id for j in queue.jobs()] == ["b"]
     freezegun_clock.move_to(at(9))
@@ -200,7 +200,7 @@ def test_lock_is_shared_reentrant_and_blocks_threads(lock, wake, store, events):
     def other():
         order.append("waiting")
         with b.coordinator_lock:
-            b.add(Job(at(8), noop, id="y"))
+            b.add(Job(at(8), None, noop, id="y"))
         order.append("added")
 
     with a.coordinator_lock:
@@ -209,7 +209,7 @@ def test_lock_is_shared_reentrant_and_blocks_threads(lock, wake, store, events):
         time.sleep(0.05)
         assert order == ["waiting"]
         with b.coordinator_lock:
-            a.add(Job(at(1), noop, id="x"))
+            a.add(Job(at(1), None, noop, id="x"))
             assert a.pop().id == "x"
         order.append("exiting")
     thread.join()

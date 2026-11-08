@@ -39,6 +39,7 @@ Events = dict[Event, list[Callable[..., None]]]
 @dataclass
 class Job(Generic[T]):
     run_at: AwareDatetime
+    expires_at: Optional[AwareDatetime]
     fn: Callable[..., Any]
     payload: Optional[T] = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -48,12 +49,22 @@ class Job(Generic[T]):
 
 
 @dataclass
-class CronJob(Job[T]):
+class CronJob(Generic[T]):
+    run_at: AwareDatetime
+    fn: Callable[..., Any]
+    payload: Optional[T] = None
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    disable: bool = False
+    name: Optional[str] = None
+    context: Any = field(default=None, compare=False, repr=False)
     cron: str = field(kw_only=True)
     id_template: str = field(kw_only=True, default="{uuid}")
 
     def __post_init__(self) -> None:
         CronSim(self.cron, self.run_at)
+
+
+AnyJob = Job[T] | CronJob[T]
 
 
 def aware(dt: datetime, what: str = "datetime") -> AwareDatetime:

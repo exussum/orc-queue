@@ -40,7 +40,7 @@ def test_next_instance_across_dst_end():
 def test_pop_respawns_the_next_occurrence(queue, freezegun_clock):
     freezegun_clock.move_to(at(1))
     with queue.coordinator_lock:
-        queue.add(Job(at(5), noop, id="plain"))
+        queue.add(Job(at(5), None, noop, id="plain"))
     job = CronJob(at(1), noop, cron="0 */2 * * *", id_template="tick-{uuid}", payload="p")
     with queue.coordinator_lock:
         queue.add(job)

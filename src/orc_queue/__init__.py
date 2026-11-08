@@ -12,16 +12,16 @@ from .api import (
     ThreadService,
     emit,
     evictable,
-    job,
     next_instance,
     on,
     run,
     schedule,
 )
 from .dal import MemoryStore, SqliteStore, Store, UnloadableJob
-from .model import AwareDatetime, CronJob, Event, Events, Job, OnFull, aware, utcnow
+from .model import AnyJob, AwareDatetime, CronJob, Event, Events, Job, OnFull, aware, utcnow
 
 __all__ = [
+    "AnyJob",
     "GIVE_UP_AFTER",
     "AsyncLane",
     "AsyncService",
@@ -46,7 +46,6 @@ __all__ = [
     "aware",
     "emit",
     "evictable",
-    "job",
     "next_instance",
     "on",
     "run",
