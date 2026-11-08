@@ -17,7 +17,7 @@ from typing import Any, Awaitable, Callable, Generic, Iterable, Optional, ParamS
 from cronsim import CronSim
 
 from . import model as m
-from .dal import Store, UnloadableJob
+from .dal import Store, UnloadableJob, expired
 
 T = TypeVar("T")
 
@@ -95,7 +95,7 @@ class JobQueue(Generic[T]):
             return False
         self._store.delete(victim.id)
         _log.warning("queue %r is full (%s), evicted earliest job %s for %s", self.name, self.cap, victim.id, incoming.id)
-        emit(self.events, m.Event.REMOVED, queue=self, job=victim)
+        emit(self.events, m.Event.EVICTED, queue=self, job=victim)
         return True
 
     def update(self, job: m.AnyJob[T]) -> None:
@@ -114,7 +114,7 @@ class JobQueue(Generic[T]):
             raise KeyError(job_id)
         self._store.delete(job_id)
         self.changed.set()
-        emit(self.events, m.Event.REMOVED, queue=self, job=job)
+        emit(self.events, m.Event.CANCELED, queue=self, job=job)
         return job
 
     def pop(self) -> Optional[m.AnyJob[T]]:
@@ -130,7 +130,7 @@ class JobQueue(Generic[T]):
         for job in self._store.droppable(now):
             if not self._iterate(job, now):
                 dropped.append(job.id)
-                emit(self.events, m.Event.REMOVED, queue=self, job=job)
+                emit(self.events, m.Event.EXPIRED if expired(job, now) else m.Event.SKIPPED, queue=self, job=job)
         if dropped:
             _log.info("queue %r: deleted jobs that will not run: %s", self.name, ", ".join(dropped))
         return self._store.first()

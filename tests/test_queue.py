@@ -166,10 +166,10 @@ def test_next_job_deletes_the_disabled_jobs_whose_time_has_passed(queue, caplog,
         assert queue.next_job() is None and queue.count() == 0
 
 
-def test_dropping_a_skipped_disabled_job_emits_removed(queue, freezegun_clock):
+def test_dropping_a_disabled_job_emits_skipped(queue, freezegun_clock):
     freezegun_clock.move_to(at(5))
     removed = []
-    on(queue.events, Event.REMOVED, lambda queue, job: removed.append(job.id))
+    on(queue.events, Event.SKIPPED, lambda queue, job: removed.append(job.id))
     with queue.coordinator_lock:
         queue.add(Job(at(1), None, noop, id="gone", disable=True))
     with queue.coordinator_lock:

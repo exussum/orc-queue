@@ -164,6 +164,10 @@ class SqliteStore(Generic[T]):
             raise UnloadableJob(job_id, exc) from exc
 
 
+def expired(job: m.AnyJob[Any], now: m.AwareDatetime) -> bool:
+    return isinstance(job, m.Job) and bool(job.expires_at and job.expires_at <= now)
+
+
 def _sort_key(job: m.AnyJob[Any]) -> SortKey:
     return SortKey(job.disable, job.run_at.astimezone(timezone.utc), job.id)
 
@@ -173,7 +177,7 @@ def _stamp(when: Optional[datetime]) -> Optional[str]:
 
 
 def _drop(job: m.AnyJob[Any], now: m.AwareDatetime) -> bool:
-    if isinstance(job, m.Job) and job.expires_at and job.expires_at <= now:
+    if expired(job, now):
         return True
     return job.disable and job.run_at <= now
 

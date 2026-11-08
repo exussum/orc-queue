@@ -19,15 +19,15 @@ def test_a_job_inside_its_deadline_runs(queue):
 
 
 def test_a_job_past_its_deadline_is_dropped(queue, events):
-    removed = []
-    on(events, Event.REMOVED, lambda **info: removed.append(info["job"].id))
+    expired = []
+    on(events, Event.EXPIRED, lambda **info: expired.append(info["job"].id))
     with queue.coordinator_lock:
         queue.add(Job(at(11), at(11) + timedelta(minutes=30), noop, id="stale"))
     with queue.coordinator_lock:
         assert queue.pop() is None
     with queue.coordinator_lock:
         assert queue.count() == 0
-    assert removed == ["stale"]
+    assert expired == ["stale"]
 
 
 def test_an_expired_head_does_not_hide_the_next_job(queue):

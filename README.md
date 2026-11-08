@@ -64,7 +64,7 @@ A one-off job.
 
 `expires_at` is a deadline, timezone-aware, or `None` for a job that never
 expires. A job the queue reaches after its `expires_at` is dropped instead of
-run, and a `REMOVED` event fires. Use it for work that is pointless once it is
+run, and an `EXPIRED` event fires. Use it for work that is pointless once it is
 late: a job whose turn comes after a long pause, or one left behind by a
 restart. An expired job is swept on the next pass over the queue, the same pass
 that clears disabled jobs whose time has gone by, so `next_job()` never offers
@@ -212,7 +212,10 @@ is called with keyword arguments.
 | `SHUTDOWN`                   | the coordinator has stopped                   | none                    |
 | `ADDED`                      | a job is added                                | `queue`, `job`          |
 | `MODIFIED`                   | a job is replaced or updated                  | `queue`, `job`          |
-| `REMOVED`                    | a job is removed, evicted, expired or skipped | `queue`, `job`          |
+| `EVICTED`                    | a full queue drops its earliest evictable job | `queue`, `job`          |
+| `CANCELED`                   | a job is removed by its id                    | `queue`, `job`          |
+| `EXPIRED`                    | a job's deadline passed before it ran         | `queue`, `job`          |
+| `SKIPPED`                    | a disabled job's time has gone by             | `queue`, `job`          |
 | `SUBMITTED`                  | a job is handed to its lane to run            | `queue`, `job`          |
 | `EXECUTED`                   | a job finished                                | `queue`, `job`          |
 | `ERROR`                      | a job raised                                  | `queue`, `job`, `error` |
