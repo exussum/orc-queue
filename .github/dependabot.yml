@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/" # Location of package manifests
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    ignore:
+      # Build backend; its module name matches the distribution name, so
+      # Dependabot's updater clobbers `build-backend = "hatchling.build"`.
+      - dependency-name: "hatchling"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"

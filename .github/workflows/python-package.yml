@@ -1,0 +1,48 @@
+name: Python package
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+    - name: Set up Python 3.14
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      with:
+        python-version: "3.14"
+    - name: Compute cache week
+      id: week
+      run: echo "week=$(date +%Y-%U)" >> "$GITHUB_OUTPUT"
+    - name: Cache tool installs
+      id: cache-tools
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: |
+          ~/.local
+          ~/.opengrep
+        key: tools-${{ runner.os }}-${{ steps.week.outputs.week }}-${{ hashFiles('.github/workflows/python-package.yml') }}
+    - name: Add local bin to PATH
+      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    - name: Install uv
+      if: steps.cache-tools.outputs.cache-hit != 'true'
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh -o /tmp/uv-install.sh
+        sh /tmp/uv-install.sh
+    - name: Install opengrep and pip-audit
+      if: steps.cache-tools.outputs.cache-hit != 'true'
+      run: |
+        curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh -o /tmp/opengrep-install.sh
+        bash /tmp/opengrep-install.sh
+        uv tool install pip-audit
+    - name: Cache pre-commit hooks
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ~/.cache/pre-commit
+        key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+    - name: Run pre-commit
+      run: uvx pre-commit run --all-files --show-diff-on-failure
