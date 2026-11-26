@@ -105,9 +105,10 @@ Methods, all called with the lock held:
 | Method                          | Does                                                                                                               |
 |---------------------------------|--------------------------------------------------------------------------------------------------------------------|
 | `add(job) -> bool`              | Adds the job, or replaces the one with its id. `False` if the queue is full and nothing could be evicted.          |
-| `update(job) -> None`           | Saves changes to a job already in the queue, such as a new `run_at` or `disable`. `KeyError` if the id is unknown. |
+| `update(job) -> bool`           | Saves changes to a job already in the queue, such as a new `run_at` or `disable`. `False` if the id is unknown.    |
+| `modify(job_id, **changes) -> bool` | Changes only the named fields of a queued job and keeps the rest, such as `disable`. Does nothing, and emits no event, if nothing differs. `False` if the id is unknown. |
 | `get(job_id) -> Job \| None`    | The job with that id, or `None`.                                                                                   |
-| `remove(job_id) -> Job`         | Deletes and returns the job. `KeyError` if the id is unknown.                                                      |
+| `remove(job_id) -> Job \| None` | Deletes and returns the job, or `None` if the id is unknown.                                                       |
 | `next_job() -> Job \| None`     | The next job that will run, without taking it.                                                                     |
 | `jobs() -> list[Job]`           | Every job, soonest first, disabled ones last.                                                                      |
 | `count() -> int`                | How many jobs the queue holds.                                                                                     |

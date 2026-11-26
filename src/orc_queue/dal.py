@@ -26,7 +26,7 @@ class UnloadableJob(RuntimeError):
 class Store(Protocol[T]):
     def get(self, job_id: str) -> Optional[m.AnyJob[T]]: ...
     def put(self, job: m.AnyJob[T]) -> None: ...
-    def delete(self, job_id: str) -> None: ...
+    def delete(self, job_id: str) -> bool: ...
     def first(self) -> Optional[m.AnyJob[T]]: ...
     def droppable(self, now: m.AwareDatetime) -> list[m.AnyJob[T]]: ...
     def all(self) -> list[m.AnyJob[T]]: ...
@@ -56,9 +56,12 @@ class MemoryStore(Generic[T]):
         self._keys[job.id] = key
         bisect.insort(self._order, key)
 
-    def delete(self, job_id: str) -> None:
+    def delete(self, job_id: str) -> bool:
+        if job_id not in self._jobs:
+            return False
         del self._jobs[job_id]
         self._drop_key(job_id)
+        return True
 
     def first(self) -> Optional[m.AnyJob[T]]:
         if not self._order or self._order[0].disable:
@@ -111,11 +114,10 @@ class SqliteStore(Generic[T]):
         )
         self._db.commit()
 
-    def delete(self, job_id: str) -> None:
+    def delete(self, job_id: str) -> bool:
         cur = self._db.execute(_DELETE, (self._name, job_id))
         self._db.commit()
-        if cur.rowcount == 0:
-            raise KeyError(job_id)
+        return cur.rowcount > 0
 
     def first(self) -> Optional[m.AnyJob[T]]:
         row = self._db.execute(_FIRST, (self._name,)).fetchone()

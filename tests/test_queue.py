@@ -4,7 +4,6 @@ import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-import pytest
 from conftest import at, noop, now
 
 from orc_queue import Event, Job, JobQueue, MemoryStore, on, schedule
@@ -67,9 +66,8 @@ def test_update_reorders_and_requires_existing(queue):
         queue.update(a)
     with queue.coordinator_lock:
         assert (queue.next_job()).id == "b"
-    with pytest.raises(KeyError):
-        with queue.coordinator_lock:
-            queue.update(Job(at(1), None, noop, id="missing"))
+    with queue.coordinator_lock:
+        assert queue.update(Job(at(1), None, noop, id="missing")) is False
 
 
 def test_get_remove_contains(queue):
@@ -83,9 +81,8 @@ def test_get_remove_contains(queue):
         assert (queue.remove("a")).id == "a"
     with queue.coordinator_lock:
         assert queue.get("a") is None
-    with pytest.raises(KeyError):
-        with queue.coordinator_lock:
-            queue.remove("a")
+    with queue.coordinator_lock:
+        assert queue.remove("a") is None
 
 
 def test_pause_blocks_pop_but_reports_next(queue):
@@ -214,3 +211,27 @@ def test_lock_is_shared_reentrant_and_blocks_threads(lock, wake, store, events):
         order.append("exiting")
     thread.join()
     assert order == ["waiting", "exiting", "added"]
+
+
+def test_modify_changes_only_the_named_fields_and_keeps_the_rest(queue):
+    with queue.coordinator_lock:
+        queue.add(Job(at(9), None, noop, payload="old", id="a", name="a", disable=True))
+        assert queue.modify("a", payload="new") is True
+        job = queue.get("a")
+    assert (job.payload, job.run_at, job.disable) == ("new", at(9), True)
+
+
+def test_modify_of_an_unknown_id_is_false_and_changes_nothing(queue):
+    with queue.coordinator_lock:
+        assert queue.modify("missing", payload="x") is False
+        assert queue.count() == 0
+
+
+def test_modify_with_nothing_different_emits_no_event_and_does_not_wake(queue):
+    events = []
+    on(queue.events, Event.MODIFIED, lambda **kw: events.append(kw))
+    with queue.coordinator_lock:
+        queue.add(Job(at(9), None, noop, payload="p", id="a"))
+        queue.changed.clear()
+        assert queue.modify("a", payload="p") is True
+    assert events == [] and not queue.changed.is_set()

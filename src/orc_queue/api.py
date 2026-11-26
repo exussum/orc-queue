@@ -98,20 +98,32 @@ class JobQueue(Generic[T]):
         emit(self.events, m.Event.EVICTED, queue=self, job=victim)
         return True
 
-    def update(self, job: m.AnyJob[T]) -> None:
+    def update(self, job: m.AnyJob[T]) -> bool:
         if not self._store.get(job.id):
-            raise KeyError(job.id)
+            return False
         self._store.put(job)
         self.changed.set()
         emit(self.events, m.Event.MODIFIED, queue=self, job=job)
+        return True
+
+    def modify(self, job_id: str, **changes: Any) -> bool:
+        old = self._store.get(job_id)
+        if not old:
+            return False
+        new = replace(old, **changes)
+        if new != old:
+            self._store.put(new)
+            self.changed.set()
+            emit(self.events, m.Event.MODIFIED, queue=self, job=new)
+        return True
 
     def get(self, job_id: str) -> Optional[m.AnyJob[T]]:
         return self._store.get(job_id)
 
-    def remove(self, job_id: str) -> m.AnyJob[T]:
+    def remove(self, job_id: str) -> Optional[m.AnyJob[T]]:
         job = self._store.get(job_id)
         if not job:
-            raise KeyError(job_id)
+            return None
         self._store.delete(job_id)
         self.changed.set()
         emit(self.events, m.Event.CANCELED, queue=self, job=job)
