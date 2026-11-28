@@ -291,7 +291,7 @@ class Coordinator(_Queues[T]):
                 if popped:
                     lane = self._lane_of[id(queue)]
                     lane.busy = True
-                    emit(queue.events, m.Event.SUBMITTED, queue=queue, job=popped)
+                    emit(queue.events, m.Event.RUNNING, queue=queue, job=popped)
                     lane.submit(queue, popped)
             if popped:
                 return queue, popped
@@ -421,7 +421,7 @@ class ManualCoordinator(_Queues[T]):
                 job = queue.pop()
                 if not job:
                     raise RuntimeError(f"tick did not move the clock to {run_at.isoformat()}")
-                emit(queue.events, m.Event.SUBMITTED, queue=queue, job=job)
+                emit(queue.events, m.Event.RUNNING, queue=queue, job=job)
             job.context = self.context
             try:
                 run(job)

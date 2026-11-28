@@ -31,7 +31,7 @@ class Event(StrEnum):
     CANCELED = "canceled"
     EXPIRED = "expired"
     SKIPPED = "skipped"
-    SUBMITTED = "submitted"
+    RUNNING = "running"
     EXECUTED = "executed"
     ERROR = "error"
 

@@ -184,7 +184,7 @@ has the coordinator's `lookup`, `find`, `cancel_job`, `pause_job` and
   calls `tick` with the job's time, and at the end with `until`; pass a frozen
   clock's `move_to` (freezegun) so each job runs at its own time. Paused queues
   are skipped, repeating jobs come back at their next time, and the same
-  `SUBMITTED`, `EXECUTED` and `ERROR` events fire.
+  `RUNNING`, `EXECUTED` and `ERROR` events fire.
 
 ### Services
 
@@ -217,7 +217,7 @@ is called with keyword arguments.
 | `CANCELED`                   | a job is removed by its id                    | `queue`, `job`          |
 | `EXPIRED`                    | a job's deadline passed before it ran         | `queue`, `job`          |
 | `SKIPPED`                    | a disabled job's time has gone by             | `queue`, `job`          |
-| `SUBMITTED`                  | a job is handed to its lane to run            | `queue`, `job`          |
+| `RUNNING`                    | a job is handed to its lane to run            | `queue`, `job`          |
 | `EXECUTED`                   | a job finished                                | `queue`, `job`          |
 | `ERROR`                      | a job raised                                  | `queue`, `job`, `error` |
 | `PAUSED`, `RESUMED`, `RESET` | a queue is paused, resumed or reset           | `queue`                 |
